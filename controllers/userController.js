@@ -38,7 +38,10 @@ router.post("/edit", authenticate, (req, res) => {
             base_currency: req.body.base_currency,
         }
     }
-    const options = {upsert: true, new: true, useFindAndModify: false, rawResult: true};
+    const options = {
+  upsert: true,
+  new: true
+};
     User.findOneAndUpdate(query, userData, options).then((rawResult) => {
         res.send(rawResult);
     }).catch((error) => {
@@ -47,19 +50,21 @@ router.post("/edit", authenticate, (req, res) => {
 })
 
 
-router.post("/login", (req, res) => {
-    User.findUserByCredentials(req.body.email, req.body.password).then((user) => {
-        if (user) {
-            user.generateAuthToken().then((token) => {
-                res.header({"x-auth": token}).send(user);
-            });
-        } else {
-            throw Error;
-        }
-    }).catch((e) => {
-        res.status(400).send("Wrong Email or Password")
-    });
-})
+router.post("/login", async (req, res) => {
+  try {
+    const user = await User.findUserByCredentials(
+      req.body.email,
+      req.body.password
+    );
+
+    const token = await user.generateAuthToken();
+
+    res.header("x-auth", token).send(user);
+
+  } catch (e) {
+    res.status(400).send("Wrong Email or Password");
+  }
+});
 
 router.delete("/logout", authenticate, (req, res) => {
     req.user.removeToken(req.token).then(() => {

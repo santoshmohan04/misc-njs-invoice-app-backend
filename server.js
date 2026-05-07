@@ -1,25 +1,33 @@
-const express = require("express")
+require("dotenv").config();
+
+const express = require("express");
 const app = express();
 
-const bodyParser = require("body-parser")
-const {mongoose} = require("./db/db");
+require("./db/db");
 
-const userController = require("./controllers/userController")
-const customerController = require("./controllers/customerController")
-const itemController = require("./controllers/itemController")
-const invoiceController = require("./controllers/invoiceController")
-const paymentController = require("./controllers/paymentController")
+const userController = require("./controllers/userController");
+const customerController = require("./controllers/customerController");
+const itemController = require("./controllers/itemController");
+const invoiceController = require("./controllers/invoiceController");
+const paymentController = require("./controllers/paymentController");
 
-app.use(bodyParser.urlencoded({encoded: false}));
-app.use(bodyParser.json());
-app.engine('html', require('ejs').renderFile)
+// Middleware
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
-app.use("/user", userController)
-app.use("/customer", customerController)
-app.use("/item", itemController)
-app.use("/invoice", invoiceController)
-app.use("/payment", paymentController)
+// View Engine
+app.engine("html", require("ejs").renderFile);
 
-app.listen(3333, () => {
-    console.log("server running on port:3333")
-})
+// Routes
+app.use("/user", userController);
+app.use("/customer", customerController);
+app.use("/item", itemController);
+app.use("/invoice", invoiceController);
+app.use("/payment", paymentController);
+
+// Server
+const PORT = process.env.PORT || 3333;
+
+app.listen(PORT, () => {
+  console.log(`Server running on port: ${PORT}`);
+});

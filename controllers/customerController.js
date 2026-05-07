@@ -20,7 +20,10 @@ router.post("/edit", authenticate, (req, res) => {
             addresses: req.body.addresses
         }
     }
-    const options = {upsert: true, new: true, useFindAndModify: false, rawResult: true};
+    const options = {
+  upsert: true,
+  new: true
+};
     Customer.findOneAndUpdate(query, customerData, options).then((rawResult) => {
         res.send(rawResult);
     }).catch((error) => {
