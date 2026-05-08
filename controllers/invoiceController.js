@@ -59,7 +59,7 @@ router.post("/edit", authenticate, validate(editSchema), asyncHandler(async (req
   const invoice = updateResult.value;
 
   // Keep customer totals in sync only when a new invoice record is created.
-  if (!updateResult.lastErrorObject?.updatedExisting) {
+  if (!updateResult.lastErrorObject.updatedExisting) {
     await Customer.updateOne(
       { _id: req.body.customer },
       { $inc: { number_invoices: 1, total: req.body.total } }
