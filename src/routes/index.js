@@ -17,8 +17,37 @@ const paymentController = require('../controllers/paymentController');
 const { apiRateLimiter } = require('../middlewares/rateLimiter');
 
 /**
- * Health check route
- * GET /health
+ * @swagger
+ * /health:
+ *   get:
+ *     tags:
+ *       - Health
+ *     summary: Health check
+ *     description: Returns the current server status, environment, and version. No authentication required.
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Server is healthy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Server is healthy
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *                 environment:
+ *                   type: string
+ *                   example: development
+ *                 version:
+ *                   type: string
+ *                   example: 1.0.0
  */
 router.get('/health', (req, res) => {
   res.status(200).json({

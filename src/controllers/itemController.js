@@ -21,8 +21,45 @@ const { createSchema, updateSchema } = require('../validations/itemValidations')
 const { sendSuccess, sendError } = require('../helpers/responseHelper');
 
 /**
- * Create item
- * POST /item/create
+ * @swagger
+ * /api/item/create:
+ *   post:
+ *     tags:
+ *       - Items
+ *     summary: Create a new item
+ *     description: Adds a new product or service to the authenticated merchant's catalogue.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ItemCreateRequest'
+ *           example:
+ *             name: Web Design Service
+ *             description: Professional web design and development
+ *             price: 150.00
+ *             category: Services
+ *             quantity: 10
+ *     responses:
+ *       201:
+ *         description: Item created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       $ref: '#/components/schemas/Item'
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.post('/create', authenticate, validate(createSchema), asyncHandler(async (req, res) => {
   const itemData = {
@@ -43,8 +80,37 @@ router.post('/create', authenticate, validate(createSchema), asyncHandler(async 
 }));
 
 /**
- * Get all items
- * GET /item/all
+ * @swagger
+ * /api/item/all:
+ *   get:
+ *     tags:
+ *       - Items
+ *     summary: Get all items
+ *     description: Returns a paginated list of all items in the authenticated merchant's catalogue.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/limitParam'
+ *       - $ref: '#/components/parameters/skipParam'
+ *       - $ref: '#/components/parameters/sortParam'
+ *     responses:
+ *       200:
+ *         description: Items retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Item'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.get('/all', authenticate, asyncHandler(async (req, res) => {
   const options = {
@@ -63,8 +129,35 @@ router.get('/all', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * Get item by ID
- * GET /item/:id
+ * @swagger
+ * /api/item/{id}:
+ *   get:
+ *     tags:
+ *       - Items
+ *     summary: Get an item by ID
+ *     description: Returns a single item from the authenticated merchant's catalogue.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/mongoIdParam'
+ *     responses:
+ *       200:
+ *         description: Item retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       $ref: '#/components/schemas/Item'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       404:
+ *         $ref: '#/components/responses/NotFoundError'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.get('/:id', authenticate, asyncHandler(async (req, res) => {
   const result = await ItemService.getById(req.params.id, req.user._id);
@@ -77,8 +170,43 @@ router.get('/:id', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * Update item
- * PUT /item/:id
+ * @swagger
+ * /api/item/{id}:
+ *   put:
+ *     tags:
+ *       - Items
+ *     summary: Update an item
+ *     description: Partially or fully updates an item in the authenticated merchant's catalogue.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/mongoIdParam'
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ItemUpdateRequest'
+ *     responses:
+ *       200:
+ *         description: Item updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       $ref: '#/components/schemas/Item'
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       404:
+ *         $ref: '#/components/responses/NotFoundError'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.put('/:id', authenticate, validate(updateSchema), asyncHandler(async (req, res) => {
   const updateData = {
@@ -99,8 +227,30 @@ router.put('/:id', authenticate, validate(updateSchema), asyncHandler(async (req
 }));
 
 /**
- * Delete item
- * DELETE /item/:id
+ * @swagger
+ * /api/item/{id}:
+ *   delete:
+ *     tags:
+ *       - Items
+ *     summary: Delete an item
+ *     description: Permanently removes an item from the authenticated merchant's catalogue.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - $ref: '#/components/parameters/mongoIdParam'
+ *     responses:
+ *       200:
+ *         description: Item deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessResponse'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       404:
+ *         $ref: '#/components/responses/NotFoundError'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.delete('/:id', authenticate, asyncHandler(async (req, res) => {
   const result = await ItemService.delete(req.params.id, req.user._id);
@@ -113,8 +263,49 @@ router.delete('/:id', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * Search items
- * GET /item/search?q=searchTerm
+ * @swagger
+ * /api/item/search:
+ *   get:
+ *     tags:
+ *       - Items
+ *     summary: Search items
+ *     description: Full-text search across the authenticated merchant's item catalogue.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Search term (matches name, description, category)
+ *         example: design
+ *       - $ref: '#/components/parameters/limitParam'
+ *       - $ref: '#/components/parameters/skipParam'
+ *     responses:
+ *       200:
+ *         description: Search results returned
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Item'
+ *       400:
+ *         description: Search term missing
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.get('/search', authenticate, asyncHandler(async (req, res) => {
   const { q: searchTerm } = req.query;
@@ -138,8 +329,44 @@ router.get('/search', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * Get items by category
- * GET /item/category/:category
+ * @swagger
+ * /api/item/category/{category}:
+ *   get:
+ *     tags:
+ *       - Items
+ *     summary: Get items by category
+ *     description: Returns all items in the specified category for the authenticated merchant.
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: category
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Category name
+ *         example: Services
+ *       - $ref: '#/components/parameters/limitParam'
+ *       - $ref: '#/components/parameters/skipParam'
+ *       - $ref: '#/components/parameters/sortParam'
+ *     responses:
+ *       200:
+ *         description: Items retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/Item'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.get('/category/:category', authenticate, asyncHandler(async (req, res) => {
   const options = {

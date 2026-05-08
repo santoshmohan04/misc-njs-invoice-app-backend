@@ -9,8 +9,10 @@ const helmet = require('helmet');
 const cors = require('cors');
 const compression = require('compression');
 const morgan = require('morgan');
+const swaggerUi = require('swagger-ui-express');
 const config = require('./config/config');
 const Logger = require('./utils/logger');
+const { swaggerSpec, swaggerUiOptions } = require('./config/swagger');
 const {
   helmetOptions,
   corsOptions,
@@ -110,11 +112,47 @@ const configureMiddleware = () => {
 };
 
 /**
+ * Swagger UI Route Configuration
+ * Mounts the API documentation UI at /api-docs.
+ * A relaxed Content-Security-Policy is applied only to this path so that
+ * Swagger UI's inline scripts and styles can execute, while the rest of the
+ * application keeps the strict production CSP defined in security.js.
+ */
+const configureSwagger = () => {
+  // Helmet override for /api-docs – allow inline scripts/styles required by Swagger UI
+  const swaggerCsp = {
+    ...helmetOptions,
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'", 'https:', 'data:'],
+        objectSrc: ["'none'"],
+        mediaSrc: ["'self'"],
+        frameSrc: ["'none'"],
+      },
+    },
+  };
+
+  app.use('/api-docs', helmet(swaggerCsp));
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions));
+
+  Logger.info('Swagger UI available at /api-docs');
+};
+
+/**
  * Route Configuration
  * Sets up all application routes
  */
 const configureRoutes = () => {
   const routes = require('./routes');
+
+  // API documentation (mounted before other routes so it is never caught by
+  // the rate limiter or the 404 handler)
+  configureSwagger();
 
   // Mount routes
   app.use('/', routes);
