@@ -57,6 +57,9 @@ router.post("/edit", authenticate, validate(editSchema), asyncHandler(async (req
 
   const updateResult = await Invoice.findOneAndUpdate(query, invoiceData, options);
   const invoice = updateResult.value;
+  if (!invoice) {
+    return sendError(res, "Invoice update failed", 500);
+  }
 
   // Keep customer totals in sync only when a new invoice record is created.
   if (!updateResult.lastErrorObject.updatedExisting) {
@@ -167,11 +170,11 @@ const invoiceToPdf = async (user, invoice) => {
 
   const outputPath = path.join(path.resolve("attachments"), "invoice.pdf");
   const writeStream = fs.createWriteStream(outputPath);
-  document.pdfkitDoc.pipe(writeStream);
 
   await new Promise((resolve, reject) => {
     writeStream.on("finish", resolve);
     writeStream.on("error", reject);
+    document.pdfkitDoc.pipe(writeStream);
   });
 };
 
