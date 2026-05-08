@@ -52,13 +52,14 @@ router.post("/edit", authenticate, validate(editSchema), asyncHandler(async (req
   const options = {
     upsert: true,
     new: true,
+    includeResultMetadata: true,
   };
 
-  const existingInvoice = await Invoice.findOne(query).select("_id");
-  const invoice = await Invoice.findOneAndUpdate(query, invoiceData, options);
+  const updateResult = await Invoice.findOneAndUpdate(query, invoiceData, options);
+  const invoice = updateResult.value;
 
   // Keep customer totals in sync only when a new invoice record is created.
-  if (!existingInvoice) {
+  if (!updateResult.lastErrorObject?.updatedExisting) {
     await Customer.updateOne(
       { _id: req.body.customer },
       { $inc: { number_invoices: 1, total: req.body.total } }
