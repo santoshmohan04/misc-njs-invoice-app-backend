@@ -57,7 +57,7 @@ const helmetOptions = {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'"],
       imgSrc: ["'self'", 'data:', 'https:'],
       connectSrc: ["'self'"],
       fontSrc: ["'self'", 'https:', 'data:'],
@@ -143,17 +143,20 @@ const apiRateLimitOptions = {
  * Strict limiter for authentication endpoints to mitigate brute-force attacks.
  * Limits each IP to 5 login attempts per 15-minute window.
  */
+const authWindowMs =
+  parseInt(process.env.LOGIN_RATE_LIMIT_WINDOW_MS, 10) || 15 * 60 * 1000;
+const authMaxRequests =
+  parseInt(process.env.LOGIN_RATE_LIMIT_MAX_REQUESTS, 10) || 5;
+
 const authRateLimitOptions = {
-  windowMs: parseInt(process.env.LOGIN_RATE_LIMIT_WINDOW_MS, 10) || 15 * 60 * 1000,
-  max: parseInt(process.env.LOGIN_RATE_LIMIT_MAX_REQUESTS, 10) || 5,
+  windowMs: authWindowMs,
+  max: authMaxRequests,
   message: {
     success: false,
     message: `Too many login attempts. Please try again after ${
-      (parseInt(process.env.LOGIN_RATE_LIMIT_WINDOW_MS, 10) || 15 * 60 * 1000) / 60000
+      authWindowMs / 60000
     } minutes.`,
-    retryAfter: Math.ceil(
-      (parseInt(process.env.LOGIN_RATE_LIMIT_WINDOW_MS, 10) || 15 * 60 * 1000) / 1000
-    ),
+    retryAfter: Math.ceil(authWindowMs / 1000),
   },
   standardHeaders: true,
   legacyHeaders: false,
