@@ -1,9 +1,15 @@
 const mongoose = require("mongoose");
-const Schema = mongoose.Schema
-const jwt = require("jsonwebtoken")
-const bcrypt = require("bcrypt")
-const _ = require("lodash")
-const SECRET_KEY = '497DCF8A12BDFC37F2B2056FE8CE1FD0A7FEF52EE83DEC10F307015226256D44';
+const Schema = mongoose.Schema;
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt");
+const _ = require("lodash");
+const { hashPassword, comparePassword, generateAccessToken, generateRefreshToken } = require("../src/utils/authUtils");
+
+// JWT Configuration from environment
+const JWT_SECRET = process.env.JWT_SECRET;
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
+const JWT_ACCESS_EXPIRATION = process.env.JWT_ACCESS_EXPIRATION || '15m';
+const JWT_REFRESH_EXPIRATION = process.env.JWT_REFRESH_EXPIRATION || '7d';
 
 const UserSchema = new Schema({
     name: {
@@ -49,92 +55,237 @@ const UserSchema = new Schema({
         access: {
             type: String,
             required: true,
+            enum: ['auth', 'refresh'] // auth for access tokens, refresh for refresh tokens
         },
         token: {
             type: String,
             required: true
+        },
+        createdAt: {
+            type: Date,
+            default: Date.now
+        },
+        expiresAt: {
+            type: Date,
+            required: false // Only for refresh tokens
         }
-    }]
-})
+    }],
+    lastLogin: {
+        type: Date,
+        default: null
+    },
+    loginAttempts: {
+        type: Number,
+        default: 0
+    },
+    lockUntil: {
+        type: Date,
+        default: null
+    }
+}, {
+    timestamps: true // Adds createdAt and updatedAt
+});
 
+// Virtual for account lock
+UserSchema.virtual('isLocked').get(function() {
+    return !!(this.lockUntil && this.lockUntil > Date.now());
+});
+
+// Index for email lookups
+UserSchema.index({ email: 1 });
+
+// Index for token cleanup (TTL index for expired refresh tokens)
+UserSchema.index({ "tokens.expiresAt": 1 }, { expireAfterSeconds: 0 });
+
+// Instance method to return user object without sensitive data
 UserSchema.methods.toJSON = function () {
     const user = this;
     const userObject = user.toObject();
-    return _.pick(userObject, ["_id", "email", "name","company","phone","address","base_currency"]);
-}
+    return _.pick(userObject, ["_id", "email", "name", "company", "phone", "address", "base_currency", "lastLogin", "createdAt", "updatedAt"]);
+};
 
-UserSchema.methods.generateAuthToken = function () {
+// Instance method to generate access token
+UserSchema.methods.generateAuthToken = async function () {
     const user = this;
-    const access = "auth"
-    const token = jwt.sign({
-        _id: user._id,
-        access
-    }, SECRET_KEY).toString()
-    user.tokens.push({access, token});
-    return user.save().then(() => {
-        return token
-    })
-}
+    const accessToken = generateAccessToken({ _id: user._id });
 
-UserSchema.methods.removeToken = function (token) {
+    // Remove existing auth tokens to prevent duplicates
+    user.tokens = user.tokens.filter(token => token.access !== 'auth');
+
+    user.tokens.push({
+        access: 'auth',
+        token: accessToken,
+        createdAt: new Date()
+    });
+
+    await user.save();
+    return accessToken;
+};
+
+// Instance method to generate refresh token
+UserSchema.methods.generateRefreshToken = async function () {
     const user = this;
-    return user.update({
-        $pull: {
-            tokens: {token}
-        }
-    })
-}
+    const refreshToken = generateRefreshToken({ _id: user._id });
+    const expiresAt = new Date(Date.now() + this.getRefreshTokenExpirationMs());
 
-UserSchema.pre("save", function (next) {
+    // Remove existing refresh tokens
+    user.tokens = user.tokens.filter(token => token.access !== 'refresh');
+
+    user.tokens.push({
+        access: 'refresh',
+        token: refreshToken,
+        createdAt: new Date(),
+        expiresAt
+    });
+
+    await user.save();
+    return refreshToken;
+};
+
+// Helper method to get refresh token expiration in milliseconds
+UserSchema.methods.getRefreshTokenExpirationMs = function() {
+    const expiration = JWT_REFRESH_EXPIRATION;
+    const unit = expiration.slice(-1);
+    const value = parseInt(expiration.slice(0, -1));
+
+    switch(unit) {
+        case 's': return value * 1000;
+        case 'm': return value * 60 * 1000;
+        case 'h': return value * 60 * 60 * 1000;
+        case 'd': return value * 24 * 60 * 60 * 1000;
+        default: return 7 * 24 * 60 * 60 * 1000; // Default 7 days
+    }
+};
+
+// Instance method to remove specific token
+UserSchema.methods.removeToken = async function (token) {
+    const user = this;
+    user.tokens = user.tokens.filter(t => t.token !== token);
+    return user.save();
+};
+
+// Instance method to remove all tokens (logout all)
+UserSchema.methods.removeAllTokens = async function () {
+    const user = this;
+    user.tokens = [];
+    return user.save();
+};
+
+// Instance method to update last login
+UserSchema.methods.updateLastLogin = async function () {
+    this.lastLogin = new Date();
+    this.loginAttempts = 0; // Reset login attempts on successful login
+    this.lockUntil = null; // Unlock account
+    return this.save();
+};
+
+// Instance method to increment login attempts
+UserSchema.methods.incLoginAttempts = async function () {
+    this.loginAttempts += 1;
+
+    // Lock account after 5 failed attempts for 2 hours
+    if (this.loginAttempts >= 5) {
+        this.lockUntil = Date.now() + 2 * 60 * 60 * 1000; // 2 hours
+    }
+
+    return this.save();
+};
+
+// Pre-save middleware to hash password
+UserSchema.pre("save", async function (next) {
     const user = this;
     if (user.isModified("password")) {
-        bcrypt.genSalt(10, function (err, salt) {
-            bcrypt.hash(user.password, salt, function (err, hash) {
-                if (err) return next(err);
-                user.password = hash;
-                next();
-            })
-        })
-    } else {
-        next()
-    }
-})
-
-UserSchema.statics.findUserByCredentials = function (email, password) {
-    const User = this;
-    return User.findOne({email}).then((user) => {
-        if (!user) {
-            Promise.reject();
-        } else {
-            return new Promise((resolve, reject) => {
-                bcrypt.compare(password, user.password, (err, res) => {
-                    if (res) {
-                        resolve(user);
-                    } else {
-
-                        reject();
-                    }
-                })
-            })
+        try {
+            user.password = await hashPassword(user.password);
+        } catch (error) {
+            return next(error);
         }
-    })
-}
-
-UserSchema.statics.findUserByToken = function (token) {
-    const User = this;
-    let decoded;
-    try {
-        decoded = jwt.verify(token, SECRET_KEY)
-    } catch (e) {
-        return Promise.reject(e);
     }
-    return User.findOne({
-        "_id": decoded._id,
-        "tokens.token": token,
-        "tokens.access": "auth",
-    })
-}
+    next();
+});
 
-const User = mongoose.model('User', UserSchema, 'users')
+// Static method to find user by credentials with rate limiting
+UserSchema.statics.findUserByCredentials = async function (email, password) {
+    const User = this;
 
-module.exports = {User};
+    const user = await User.findOne({ email });
+    if (!user) {
+        throw new Error('Invalid email or password');
+    }
+
+    // Check if account is locked
+    if (user.isLocked) {
+        throw new Error('Account is temporarily locked due to too many failed login attempts');
+    }
+
+    const isPasswordValid = await comparePassword(password, user.password);
+    if (!isPasswordValid) {
+        await user.incLoginAttempts();
+        throw new Error('Invalid email or password');
+    }
+
+    // Update last login on successful authentication
+    await user.updateLastLogin();
+
+    return user;
+};
+
+// Static method to find user by access token
+UserSchema.statics.findUserByToken = async function (token) {
+    const User = this;
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+
+        if (decoded.type !== 'access') {
+            throw new Error('Invalid token type');
+        }
+
+        const user = await User.findOne({
+            "_id": decoded._id,
+            "tokens.token": token,
+            "tokens.access": "auth",
+        });
+
+        if (!user) {
+            throw new Error('User not found');
+        }
+
+        return user;
+
+    } catch (error) {
+        throw new Error('Invalid token');
+    }
+};
+
+// Static method to find user by refresh token
+UserSchema.statics.findUserByRefreshToken = async function (refreshToken) {
+    const User = this;
+
+    try {
+        const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
+
+        if (decoded.type !== 'refresh') {
+            throw new Error('Invalid token type');
+        }
+
+        const user = await User.findOne({
+            "_id": decoded._id,
+            "tokens.token": refreshToken,
+            "tokens.access": "refresh",
+        });
+
+        if (!user) {
+            throw new Error('User not found');
+        }
+
+        return user;
+
+    } catch (error) {
+        throw new Error('Invalid refresh token');
+    }
+};
+
+const User = mongoose.model('User', UserSchema, 'users');
+
+module.exports = { User };
