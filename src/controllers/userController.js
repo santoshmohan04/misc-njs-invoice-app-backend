@@ -22,29 +22,6 @@ const { registerSchema, loginSchema, editSchema } = require('../validations/user
 const { sendSuccess, sendError } = require('../helpers/responseHelper');
 
 /**
- * User Controller
- * Thin controllers that delegate business logic to services
- */
-
-const express = require('express');
-const router = express.Router();
-
-// Services
-const AuthService = require('../services/authService');
-
-// Middlewares
-const { authenticate } = require('../middlewares/authenticate');
-const validate = require('../middlewares/validate');
-const { loginRateLimiter } = require('../middlewares/rateLimiter');
-const asyncHandler = require('../helpers/asyncHandler');
-
-// Validation schemas
-const { registerSchema, loginSchema, editSchema } = require('../validations/userValidations');
-
-// Response helpers
-const { sendSuccess, sendError } = require('../helpers/responseHelper');
-
-/**
  * @swagger
  * /api/user/register:
  *   post:

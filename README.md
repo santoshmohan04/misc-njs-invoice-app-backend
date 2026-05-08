@@ -54,6 +54,9 @@ All subsequent requests made from the UI will include your JWT automatically.
 - The `/api-docs` route uses a relaxed Content-Security-Policy to allow Swagger UI's inline assets. All other routes keep the strict production CSP.
 
 
+## Usage
+
+* Clone or download repository
 * Go into the main app directory
 * Install dependencies by running `npm install`
 * Configure environment variables in `.env` file
