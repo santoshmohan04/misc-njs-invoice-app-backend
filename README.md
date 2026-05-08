@@ -22,6 +22,38 @@ This is a Node/Express JS back-end app for issuing invoices by merchants of smal
 - MongoDB TTL indexes for automatic token cleanup
 - CORS and security headers support
 
+## API Documentation (Swagger UI)
+
+This project uses **swagger-jsdoc** and **swagger-ui-express** to generate and serve interactive OpenAPI 3.0 documentation.
+
+### Accessing Swagger UI
+
+Start the server and open the following URL in your browser:
+
+```
+http://localhost:3333/api-docs
+```
+
+Replace `3333` with whatever `PORT` is set in your `.env` file.
+
+### Authenticating in Swagger UI
+
+Most endpoints require a JWT Bearer token. To authenticate:
+
+1. Call **POST /api/user/register** or **POST /api/user/login** from the Swagger UI (no lock icon needed — these endpoints are public).
+2. Copy the `accessToken` value from the response body.
+3. Click the **Authorize 🔓** button at the top-right of the Swagger UI page.
+4. In the **bearerAuth** field, enter your token (just the token string — Swagger adds the `Bearer ` prefix automatically).
+5. Click **Authorize** then **Close**.
+
+All subsequent requests made from the UI will include your JWT automatically.
+
+### Production Considerations
+
+- Swagger UI is available in all environments. If you want to restrict it to development only, you can wrap the `configureSwagger()` call in `src/app.js` with a `NODE_ENV` check.
+- The `/api-docs` route uses a relaxed Content-Security-Policy to allow Swagger UI's inline assets. All other routes keep the strict production CSP.
+
+
 ## Usage
 
 * Clone or download repository

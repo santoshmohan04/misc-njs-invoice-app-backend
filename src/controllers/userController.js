@@ -22,8 +22,59 @@ const { registerSchema, loginSchema, editSchema } = require('../validations/user
 const { sendSuccess, sendError } = require('../helpers/responseHelper');
 
 /**
- * User Registration Route
- * POST /user/register
+ * @swagger
+ * /api/user/register:
+ *   post:
+ *     tags:
+ *       - Authentication
+ *     summary: Register a new merchant account
+ *     description: Creates a new merchant account and returns a JWT access/refresh token pair.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UserRegisterRequest'
+ *           example:
+ *             name: John Doe
+ *             email: john@example.com
+ *             password: SecurePass123
+ *             company: ABC Corp
+ *             phone: "+1234567890"
+ *             address: "123 Main St, Springfield"
+ *             base_currency: USD
+ *     responses:
+ *       201:
+ *         description: Account created successfully
+ *         headers:
+ *           x-auth:
+ *             schema:
+ *               type: string
+ *             description: JWT access token
+ *           x-refresh-token:
+ *             schema:
+ *               type: string
+ *             description: JWT refresh token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       $ref: '#/components/schemas/TokenPair'
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       409:
+ *         description: Email already in use
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.post('/register', validate(registerSchema), asyncHandler(async (req, res) => {
   const userData = {
@@ -50,8 +101,60 @@ router.post('/register', validate(registerSchema), asyncHandler(async (req, res)
 }));
 
 /**
- * User Login Route with Rate Limiting
- * POST /user/login
+ * @swagger
+ * /api/user/login:
+ *   post:
+ *     tags:
+ *       - Authentication
+ *     summary: Log in with email and password
+ *     description: Authenticates a merchant and returns a JWT access/refresh token pair. Rate limited to 5 attempts per 15 minutes.
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UserLoginRequest'
+ *           example:
+ *             email: john@example.com
+ *             password: SecurePass123
+ *     responses:
+ *       200:
+ *         description: Login successful
+ *         headers:
+ *           x-auth:
+ *             schema:
+ *               type: string
+ *             description: JWT access token
+ *           x-refresh-token:
+ *             schema:
+ *               type: string
+ *             description: JWT refresh token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       $ref: '#/components/schemas/TokenPair'
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       401:
+ *         description: Invalid credentials
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       429:
+ *         description: Too many login attempts
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.post('/login', loginRateLimiter, validate(loginSchema), asyncHandler(async (req, res) => {
   const result = await AuthService.login(req.body.email, req.body.password);
@@ -68,8 +171,57 @@ router.post('/login', loginRateLimiter, validate(loginSchema), asyncHandler(asyn
 }));
 
 /**
- * Refresh Token Route
- * POST /user/refresh
+ * @swagger
+ * /api/user/refresh:
+ *   post:
+ *     tags:
+ *       - Authentication
+ *     summary: Refresh the JWT access token
+ *     description: Issues a new access token using a valid refresh token. Pass the refresh token either in the request body or in the `x-refresh-token` header.
+ *     security: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               refreshToken:
+ *                 type: string
+ *                 example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *     responses:
+ *       200:
+ *         description: Token refreshed successfully
+ *         headers:
+ *           x-auth:
+ *             schema:
+ *               type: string
+ *             description: New JWT access token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: object
+ *                       properties:
+ *                         accessToken:
+ *                           type: string
+ *       400:
+ *         description: Refresh token missing
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: Refresh token invalid or expired
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.post('/refresh', asyncHandler(async (req, res) => {
   const refreshToken = req.body.refreshToken || req.header('x-refresh-token');
@@ -91,8 +243,44 @@ router.post('/refresh', asyncHandler(async (req, res) => {
 }));
 
 /**
- * User Profile Edit Route
- * POST /user/edit
+ * @swagger
+ * /api/user/edit:
+ *   post:
+ *     tags:
+ *       - Authentication
+ *     summary: Update the authenticated user's profile
+ *     description: Updates merchant profile fields such as company, phone, address, and base currency.
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UserEditRequest'
+ *           example:
+ *             company: Updated Corp
+ *             phone: "+1987654321"
+ *             address: "456 New St, Springfield"
+ *             base_currency: EUR
+ *     responses:
+ *       200:
+ *         description: Profile updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       $ref: '#/components/schemas/User'
+ *       400:
+ *         $ref: '#/components/responses/ValidationError'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.post('/edit', authenticate, validate(editSchema), asyncHandler(async (req, res) => {
   const updateData = {
@@ -112,8 +300,26 @@ router.post('/edit', authenticate, validate(editSchema), asyncHandler(async (req
 }));
 
 /**
- * User Logout Route (single session)
- * DELETE /user/logout
+ * @swagger
+ * /api/user/logout:
+ *   delete:
+ *     tags:
+ *       - Authentication
+ *     summary: Log out current session
+ *     description: Invalidates the current access token (single session logout).
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logged out successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessResponse'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.delete('/logout', authenticate, asyncHandler(async (req, res) => {
   const result = await AuthService.logout(req.user._id, req.token);
@@ -126,8 +332,26 @@ router.delete('/logout', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * User Logout All Route (all sessions)
- * DELETE /user/logout-all
+ * @swagger
+ * /api/user/logout-all:
+ *   delete:
+ *     tags:
+ *       - Authentication
+ *     summary: Log out all sessions
+ *     description: Invalidates all active access tokens for the authenticated user (all devices/sessions).
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: All sessions logged out successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SuccessResponse'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.delete('/logout-all', authenticate, asyncHandler(async (req, res) => {
   const result = await AuthService.logoutAll(req.user._id);
@@ -140,8 +364,34 @@ router.delete('/logout-all', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * Get User Profile Route
- * GET /user/user
+ * @swagger
+ * /api/user/user:
+ *   get:
+ *     tags:
+ *       - Authentication
+ *     summary: Get current user profile
+ *     description: Returns the profile of the currently authenticated merchant.
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: User profile retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       type: object
+ *                       properties:
+ *                         user:
+ *                           $ref: '#/components/schemas/User'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.get('/user', authenticate, asyncHandler(async (req, res) => {
   sendSuccess(res, {
@@ -150,8 +400,49 @@ router.get('/user', authenticate, asyncHandler(async (req, res) => {
 }));
 
 /**
- * Verify Token Route (for frontend token validation)
- * POST /user/verify
+ * @swagger
+ * /api/user/verify:
+ *   post:
+ *     tags:
+ *       - Authentication
+ *     summary: Verify a JWT access token
+ *     description: Validates the supplied access token and returns the decoded user data. Useful for frontend token validation.
+ *     security: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               token:
+ *                 type: string
+ *                 example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *     responses:
+ *       200:
+ *         description: Token is valid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               allOf:
+ *                 - $ref: '#/components/schemas/SuccessResponse'
+ *                 - type: object
+ *                   properties:
+ *                     data:
+ *                       $ref: '#/components/schemas/User'
+ *       400:
+ *         description: Token missing
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       401:
+ *         description: Token invalid or expired
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         $ref: '#/components/responses/ServerError'
  */
 router.post('/verify', asyncHandler(async (req, res) => {
   const token = req.body.token || req.header('x-auth') || req.header('Authorization')?.replace('Bearer ', '');

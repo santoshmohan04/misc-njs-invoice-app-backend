@@ -23,6 +23,8 @@
     "morgan": "^1.10.1",
     "pdf-invoice": "^1.0.2",
     "stripe": "^18.1.1",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
     "winston": "^3.19.0"
   },
   "devDependencies": {
