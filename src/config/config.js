@@ -66,6 +66,16 @@ const config = {
     level: process.env.LOG_LEVEL || 'info',
     enableConsole: process.env.NODE_ENV !== 'test',
     enableFile: process.env.NODE_ENV === 'production'
+  },
+
+  // Security / CORS
+  security: {
+    // Comma-separated list of allowed CORS origins (e.g. https://myapp.com,https://staging.myapp.com)
+    corsOrigins: process.env.CORS_ORIGINS || '',
+    // Primary frontend URL shorthand (merged into corsOrigins)
+    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+    // Trust the first hop from a reverse proxy (nginx, load balancer, etc.)
+    trustProxy: process.env.TRUST_PROXY === 'true' || process.env.NODE_ENV === 'production',
   }
 };
 

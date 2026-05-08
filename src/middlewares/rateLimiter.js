@@ -1,49 +1,30 @@
-const rateLimit = require('express-rate-limit');
-
 /**
- * Rate limiting configuration from environment variables
+ * Rate Limiting Middleware
+ * Re-exports the centralized rate-limiter instances defined in
+ * src/config/security.js so that routes can import them from this
+ * conventional middlewares location without duplicating configuration.
  */
+
+const {
+  apiRateLimiter,
+  authRateLimiter,
+  authRateLimitOptions,
+} = require('../config/security');
+
+// Keep RATE_LIMIT_CONFIG for any existing code that reads it
 const RATE_LIMIT_CONFIG = {
-  WINDOW_MS: parseInt(process.env.LOGIN_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  MAX_REQUESTS: parseInt(process.env.LOGIN_RATE_LIMIT_MAX_REQUESTS) || 5, // 5 requests per window
+  WINDOW_MS: authRateLimitOptions.windowMs,
+  MAX_REQUESTS: authRateLimitOptions.max,
 };
 
 /**
- * Login rate limiter middleware
- * Limits login attempts to prevent brute force attacks
+ * Login rate limiter – strict limit to mitigate brute-force attacks.
+ * Configured via LOGIN_RATE_LIMIT_WINDOW_MS / LOGIN_RATE_LIMIT_MAX_REQUESTS.
  */
-const loginRateLimiter = rateLimit({
-  windowMs: RATE_LIMIT_CONFIG.WINDOW_MS,
-  max: RATE_LIMIT_CONFIG.MAX_REQUESTS,
-  message: {
-    success: false,
-    message: `Too many login attempts. Please try again after ${RATE_LIMIT_CONFIG.WINDOW_MS / 60000} minutes.`,
-    retryAfter: Math.ceil(RATE_LIMIT_CONFIG.WINDOW_MS / 1000)
-  },
-  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
-  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
-  // Use default IP-based rate limiting (handles IPv4/IPv6 properly)
-  // keyGenerator is not needed - express-rate-limit handles this automatically
-});
-
-/**
- * General API rate limiter
- * Limits general API requests to prevent abuse
- */
-const apiRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // 100 requests per window per IP
-  message: {
-    success: false,
-    message: "Too many requests. Please try again later.",
-    retryAfter: 900 // 15 minutes in seconds
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
+const loginRateLimiter = authRateLimiter;
 
 module.exports = {
   loginRateLimiter,
   apiRateLimiter,
-  RATE_LIMIT_CONFIG
+  RATE_LIMIT_CONFIG,
 };
