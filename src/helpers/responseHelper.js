@@ -4,6 +4,7 @@
  */
 
 const { HTTP_STATUS, MESSAGES } = require('../constants');
+const { successEnvelope, errorEnvelope } = require('../contracts/response.contract');
 
 /**
  * Create a success response object
@@ -13,12 +14,7 @@ const { HTTP_STATUS, MESSAGES } = require('../constants');
  * @returns {Object} Formatted success response
  */
 const createSuccessResponse = (data = null, message = MESSAGES.SUCCESS, statusCode = HTTP_STATUS.OK) => {
-  return {
-    success: true,
-    message,
-    data,
-    statusCode
-  };
+  return successEnvelope({ data, message, statusCode });
 };
 
 /**
@@ -29,17 +25,7 @@ const createSuccessResponse = (data = null, message = MESSAGES.SUCCESS, statusCo
  * @returns {Object} Formatted error response
  */
 const createErrorResponse = (message = MESSAGES.INTERNAL_ERROR, statusCode = HTTP_STATUS.INTERNAL_SERVER_ERROR, errors = null) => {
-  const response = {
-    success: false,
-    message,
-    statusCode
-  };
-
-  if (errors) {
-    response.errors = errors;
-  }
-
-  return response;
+  return errorEnvelope({ message, statusCode, errors });
 };
 
 /**
@@ -50,7 +36,12 @@ const createErrorResponse = (message = MESSAGES.INTERNAL_ERROR, statusCode = HTT
  * @param {number} statusCode - HTTP status code
  */
 const sendSuccess = (res, data = null, message = MESSAGES.SUCCESS, statusCode = HTTP_STATUS.OK) => {
-  const response = createSuccessResponse(data, message, statusCode);
+  const response = successEnvelope({
+    data,
+    message,
+    statusCode,
+    meta: { correlationId: res.getHeader('x-correlation-id') || null },
+  });
   return res.status(statusCode).json(response);
 };
 
@@ -62,7 +53,12 @@ const sendSuccess = (res, data = null, message = MESSAGES.SUCCESS, statusCode = 
  * @param {any} errors - Additional error details
  */
 const sendError = (res, message = MESSAGES.INTERNAL_ERROR, statusCode = HTTP_STATUS.INTERNAL_SERVER_ERROR, errors = null) => {
-  const response = createErrorResponse(message, statusCode, errors);
+  const response = errorEnvelope({
+    message,
+    statusCode,
+    errors,
+    meta: { correlationId: res.getHeader('x-correlation-id') || null },
+  });
   return res.status(statusCode).json(response);
 };
 

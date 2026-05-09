@@ -9,9 +9,12 @@ const helmet = require('helmet');
 const cors = require('cors');
 const compression = require('compression');
 const morgan = require('morgan');
+const cookieParser = require('cookie-parser');
 const swaggerUi = require('swagger-ui-express');
 const config = require('./config/config');
 const Logger = require('./utils/logger');
+const requestContext = require('./middlewares/requestContext');
+const { startJobs } = require('./jobs/cleanupJobs');
 const { swaggerSpec, swaggerUiOptions } = require('./config/swagger');
 const {
   helmetOptions,
@@ -75,6 +78,13 @@ const configureMiddleware = () => {
   // -----------------------------------------------------------------------
   app.use(compression(compressionOptions));
 
+  // Correlation ID and request timing context.
+  app.use(requestContext);
+
+  // Stripe webhook requires raw body for signature verification.
+  app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
+  app.use('/webhooks/stripe', express.raw({ type: 'application/json' }));
+
   // -----------------------------------------------------------------------
   // Morgan – structured HTTP request logging.
   // Uses 'combined' format in production (includes IP, user-agent) and
@@ -92,6 +102,7 @@ const configureMiddleware = () => {
   // Body parsing middleware
   app.use(express.urlencoded({ extended: true }));
   app.use(express.json({ limit: '10mb' }));
+  app.use(cookieParser());
 
   // View Engine
   app.engine('html', require('ejs').renderFile);
@@ -195,6 +206,9 @@ const initializeApp = async () => {
 
     // Configure error handling
     configureErrorHandling();
+
+    // Start lightweight recurring jobs.
+    startJobs();
 
     Logger.info('Application initialized successfully');
 

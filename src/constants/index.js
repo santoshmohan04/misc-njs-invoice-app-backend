@@ -104,5 +104,6 @@ module.exports = {
   USER_ROLES,
   PAYMENT_STATUS,
   INVOICE_STATUS,
-  CURRENCIES
+  CURRENCIES,
+  ...require('./api.constants')
 };

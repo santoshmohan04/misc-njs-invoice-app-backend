@@ -6,6 +6,7 @@
 const Logger = require('../utils/logger');
 const { sendError } = require('../helpers/responseHelper');
 const config = require('../config/config');
+const { AppError } = require('../errors');
 
 /**
  * Global error handling middleware
@@ -22,6 +23,11 @@ const errorHandler = (err, req, res, next) => {
   if (err.name === 'ValidationError') {
     const errors = Object.values(err.errors).map(e => e.message);
     return sendError(res, 'Validation failed', 400, errors);
+  }
+
+  // Joi validation error
+  if (err.isJoi) {
+    return sendError(res, 'Validation failed', 400, err.details?.map((d) => d.message) || null);
   }
 
   // JWT errors
@@ -44,8 +50,8 @@ const errorHandler = (err, req, res, next) => {
   }
 
   // Custom application errors
-  if (err.statusCode) {
-    return sendError(res, err.message, err.statusCode, err.errors);
+  if (err instanceof AppError || err.statusCode) {
+    return sendError(res, err.message, err.statusCode || 500, err.details || err.errors || null);
   }
 
   // Default error response
@@ -53,7 +59,7 @@ const errorHandler = (err, req, res, next) => {
     ? 'Internal server error'
     : err.message || 'Internal server error';
 
-  sendError(res, message, 500);
+  return sendError(res, message, 500);
 };
 
 /**

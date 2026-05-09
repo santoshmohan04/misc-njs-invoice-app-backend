@@ -4,9 +4,34 @@
  */
 
 const dotenv = require('dotenv');
+const { validateEnv } = require('./env.validation');
 
 // Load environment variables
 dotenv.config();
+
+const env = validateEnv();
+
+const parseDurationMs = (duration) => {
+  const unit = duration.slice(-1);
+  const value = Number(duration.slice(0, -1));
+
+  if (Number.isNaN(value)) {
+    return 0;
+  }
+
+  switch (unit) {
+    case 's':
+      return value * 1000;
+    case 'm':
+      return value * 60 * 1000;
+    case 'h':
+      return value * 60 * 60 * 1000;
+    case 'd':
+      return value * 24 * 60 * 60 * 1000;
+    default:
+      return value;
+  }
+};
 
 /**
  * Application Configuration
@@ -15,13 +40,13 @@ const config = {
   // Server Configuration
   server: {
     port: process.env.PORT || 3333,
-    env: process.env.NODE_ENV || 'development',
-    host: process.env.HOST || 'localhost'
+    env: env.NODE_ENV,
+    host: env.HOST
   },
 
   // Database Configuration
   database: {
-    url: process.env.MONGODB_URL,
+    url: env.MONGODB_URL,
     options: {
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
@@ -31,26 +56,34 @@ const config = {
 
   // JWT Configuration
   jwt: {
-    secret: process.env.JWT_SECRET,
-    refreshSecret: process.env.JWT_REFRESH_SECRET,
-    accessExpiration: process.env.JWT_ACCESS_EXPIRATION || '15m',
-    refreshExpiration: process.env.JWT_REFRESH_EXPIRATION || '7d'
+    secret: env.JWT_SECRET,
+    refreshSecret: env.JWT_REFRESH_SECRET,
+    accessExpiration: env.JWT_ACCESS_EXPIRATION,
+    refreshExpiration: env.JWT_REFRESH_EXPIRATION,
+    accessExpirationMs: parseDurationMs(env.JWT_ACCESS_EXPIRATION),
+    refreshExpirationMs: parseDurationMs(env.JWT_REFRESH_EXPIRATION),
   },
 
   // Email Configuration
   email: {
-    service: process.env.EMAIL_SERVICE || 'gmail',
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-    from: process.env.EMAIL_FROM || 'invoiceappserver@gmail.com'
+    service: env.EMAIL_SERVICE,
+    user: env.EMAIL_USER,
+    pass: env.EMAIL_PASS,
+    from: env.EMAIL_FROM
+  },
+
+  stripe: {
+    secretKey: env.STRIPE_SECRET_KEY,
+    webhookSecret: env.STRIPE_WEBHOOK_SECRET,
   },
 
   // Rate Limiting
   rateLimit: {
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // limit each IP to 100 requests per windowMs
-    loginMax: 5, // limit login attempts
-    loginWindowMs: 15 * 60 * 1000 // 15 minutes
+    windowMs: env.API_RATE_LIMIT_WINDOW_MS,
+    max: env.API_RATE_LIMIT_MAX_REQUESTS,
+    loginMax: env.LOGIN_RATE_LIMIT_MAX_REQUESTS,
+    loginWindowMs: env.LOGIN_RATE_LIMIT_WINDOW_MS,
+    userMax: env.USER_RATE_LIMIT_MAX_REQUESTS,
   },
 
   // File Upload
@@ -61,42 +94,30 @@ const config = {
 
   // Logging
   logging: {
-    level: process.env.LOG_LEVEL || 'info',
+    level: env.LOG_LEVEL,
     enableConsole: process.env.NODE_ENV !== 'test',
     enableFile: process.env.NODE_ENV === 'production'
+  },
+
+  auth: {
+    strategy: env.AUTH_STRATEGY,
+    inactivityTimeoutMs: env.AUTH_INACTIVITY_TIMEOUT_MS,
+    cookies: {
+      secure: env.COOKIE_SECURE,
+      sameSite: env.COOKIE_SAME_SITE,
+      domain: env.COOKIE_DOMAIN || undefined,
+    },
   },
 
   // Security / CORS
   security: {
     // Comma-separated list of allowed CORS origins (e.g. https://myapp.com,https://staging.myapp.com)
-    corsOrigins: process.env.CORS_ORIGINS || '',
+    corsOrigins: env.CORS_ORIGINS || '',
     // Primary frontend URL shorthand (merged into corsOrigins)
-    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+    frontendUrl: env.FRONTEND_URL || 'http://localhost:3000',
     // Trust the first hop from a reverse proxy (nginx, load balancer, etc.)
-    trustProxy: process.env.TRUST_PROXY === 'true' || process.env.NODE_ENV === 'production',
+    trustProxy: env.TRUST_PROXY || env.NODE_ENV === 'production',
   }
 };
-
-/**
- * Validate required environment variables
- */
-const validateConfig = () => {
-  const requiredVars = [
-    'MONGODB_URL',
-    'JWT_SECRET',
-    'JWT_REFRESH_SECRET',
-    'EMAIL_USER',
-    'EMAIL_PASS'
-  ];
-
-  const missing = requiredVars.filter(varName => !process.env[varName]);
-
-  if (missing.length > 0) {
-    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
-  }
-};
-
-// Validate configuration on module load
-validateConfig();
 
 module.exports = config;

@@ -8,6 +8,7 @@
 const {
   apiRateLimiter,
   authRateLimiter,
+  userRateLimiter,
   authRateLimitOptions,
 } = require('../config/security');
 
@@ -26,5 +27,6 @@ const loginRateLimiter = authRateLimiter;
 module.exports = {
   loginRateLimiter,
   apiRateLimiter,
+  userRateLimiter,
   RATE_LIMIT_CONFIG,
 };

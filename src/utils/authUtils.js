@@ -1,14 +1,15 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
+const config = require('../config/config');
 
 /**
  * JWT Configuration from environment variables
  */
 const JWT_CONFIG = {
-  SECRET: process.env.JWT_SECRET,
-  REFRESH_SECRET: process.env.JWT_REFRESH_SECRET,
-  ACCESS_EXPIRATION: process.env.JWT_ACCESS_EXPIRATION || '15m',
-  REFRESH_EXPIRATION: process.env.JWT_REFRESH_EXPIRATION || '7d'
+  SECRET: config.jwt.secret,
+  REFRESH_SECRET: config.jwt.refreshSecret,
+  ACCESS_EXPIRATION: config.jwt.accessExpiration,
+  REFRESH_EXPIRATION: config.jwt.refreshExpiration
 };
 
 /**
@@ -89,8 +90,17 @@ const comparePassword = async (password, hash) => {
  * @returns {string|null} Extracted token or null
  */
 const extractToken = (req) => {
+  const strategy = config.auth.strategy || 'hybrid';
+  let token = null;
+
+  if (strategy === 'cookie' || strategy === 'hybrid') {
+    token = req.cookies?.accessToken || null;
+  }
+
   // Check x-auth header first (legacy support)
-  let token = req.header('x-auth');
+  if (!token && (strategy === 'header' || strategy === 'hybrid')) {
+    token = req.header('x-auth');
+  }
 
   // Check Authorization Bearer header
   if (!token) {
@@ -98,6 +108,21 @@ const extractToken = (req) => {
     if (authHeader && authHeader.startsWith('Bearer ')) {
       token = authHeader.substring(7); // Remove 'Bearer ' prefix
     }
+  }
+
+  return token;
+};
+
+const extractRefreshToken = (req) => {
+  const strategy = config.auth.strategy || 'hybrid';
+  let token = null;
+
+  if (strategy === 'cookie' || strategy === 'hybrid') {
+    token = req.cookies?.refreshToken || null;
+  }
+
+  if (!token && (strategy === 'header' || strategy === 'hybrid')) {
+    token = req.body?.refreshToken || req.header('x-refresh-token');
   }
 
   return token;
@@ -141,6 +166,7 @@ module.exports = {
   hashPassword,
   comparePassword,
   extractToken,
+  extractRefreshToken,
   createErrorResponse,
   createSuccessResponse
 };

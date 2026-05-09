@@ -7,6 +7,7 @@ const paymentRepository = require('../repositories/paymentRepository');
 const invoiceRepository = require('../repositories/invoiceRepository');
 const { createSuccessResponse, createErrorResponse } = require('../helpers/responseHelper');
 const Logger = require('../utils/logger');
+const AuditService = require('./auditService');
 
 class PaymentService {
   /**
@@ -38,8 +39,18 @@ class PaymentService {
       // Set merchant ID and status
       paymentData.merchant = merchantId;
       paymentData.status = paymentData.status || 'pending';
+      paymentData.amount = paymentData.amount || paymentData.amount_due || paymentData.amount_paid || invoice.total;
+      paymentData.amount_due = paymentData.amount_due || invoice.total;
 
       const payment = await paymentRepository.create(paymentData);
+
+      await AuditService.log({
+        actorId: merchantId,
+        action: 'payment.create',
+        entityType: 'payment',
+        entityId: payment._id.toString(),
+        metadata: { invoiceId: paymentData.invoice, amount: paymentData.amount },
+      });
 
       Logger.info('Payment created successfully', { paymentId: payment._id, merchantId });
 
@@ -138,6 +149,14 @@ class PaymentService {
         runValidators: true
       });
 
+      await AuditService.log({
+        actorId: merchantId,
+        action: 'payment.update_status',
+        entityType: 'payment',
+        entityId: paymentId,
+        metadata: { status },
+      });
+
       Logger.info('Payment status updated successfully', { paymentId, merchantId, status });
 
       return createSuccessResponse({ payment: updatedPayment }, 'Payment status updated successfully');
@@ -206,6 +225,17 @@ class PaymentService {
         stripePaymentIntentId: paymentIntent.id,
         processedAt: new Date()
       }, { new: true });
+
+      await AuditService.log({
+        actorId: merchantId,
+        action: 'payment.process',
+        entityType: 'payment',
+        entityId: paymentId,
+        metadata: {
+          status: newStatus,
+          stripePaymentIntentId: paymentIntent.id,
+        },
+      });
 
       Logger.info('Payment processed', {
         paymentId,

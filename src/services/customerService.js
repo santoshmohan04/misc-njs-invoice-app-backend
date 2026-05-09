@@ -6,6 +6,7 @@
 const customerRepository = require('../repositories/customerRepository');
 const { createSuccessResponse, createErrorResponse } = require('../helpers/responseHelper');
 const Logger = require('../utils/logger');
+const AuditService = require('./auditService');
 
 class CustomerService {
   /**
@@ -28,6 +29,14 @@ class CustomerService {
       customerData.merchant = merchantId;
 
       const customer = await customerRepository.create(customerData);
+
+      await AuditService.log({
+        actorId: merchantId,
+        action: 'customer.create',
+        entityType: 'customer',
+        entityId: customer._id.toString(),
+        metadata: { email: customer.email },
+      });
 
       Logger.info('Customer created successfully', { customerId: customer._id, merchantId });
 
@@ -126,6 +135,14 @@ class CustomerService {
         runValidators: true
       });
 
+      await AuditService.log({
+        actorId: merchantId,
+        action: 'customer.update',
+        entityType: 'customer',
+        entityId: customerId,
+        metadata: { fields: Object.keys(updateData || {}) },
+      });
+
       Logger.info('Customer updated successfully', { customerId, merchantId });
 
       return createSuccessResponse({ customer }, 'Customer updated successfully');
@@ -169,6 +186,14 @@ class CustomerService {
       }
 
       await customerRepository.deleteById(customerId);
+
+      await AuditService.log({
+        actorId: merchantId,
+        action: 'customer.delete',
+        entityType: 'customer',
+        entityId: customerId,
+        metadata: {},
+      });
 
       Logger.info('Customer deleted successfully', { customerId, merchantId });
 

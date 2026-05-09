@@ -34,7 +34,6 @@ src/
   services/             Business logic (AuthService, CustomerService, ItemService,
                         InvoiceService, PaymentService)
   repositories/         Mongoose query layer (baseRepository + per-domain repos)
-  models/               Mongoose schema definitions (legacy folder at project root)
   middlewares/
     authenticate.js     JWT auth guard (authenticate, optionalAuthenticate, authenticateAdmin)
     validate.js         Joi schema validation middleware
@@ -60,8 +59,8 @@ models/ (root)          Legacy Mongoose models (User, Customer, Item, Invoice, P
 HTTP Request
   → Rate limiter (express-rate-limit)
   → Helmet / CORS / Compression / Morgan
-  → Authenticate middleware (JWT verification)
-  → Joi Validate middleware
+  → Authenticate middleware (JWT verification, protected routes only)
+  → Joi Validate middleware (routes with validation schemas)
   → Controller (router)
   → Service (business logic)
   → Repository (Mongoose queries)
@@ -81,7 +80,7 @@ HTTP Request
 | Token refresh | Issues a new access token from a valid refresh token (no re-login) |
 | Logout (current) | Invalidates the current access token only |
 | Logout all | Clears all stored tokens for the user (all devices) |
-| Token verify | Validates a token and returns decoded user data |
+| Token verify | Validates a token and returns the associated user data |
 | Get profile | Returns the authenticated merchant's public profile |
 | Edit profile | Updates company, phone, address, base_currency |
 
@@ -232,6 +231,10 @@ Token refresh (before access token expires):
   POST /api/user/refresh  body: { refreshToken }
   or header: x-refresh-token: <refreshToken>
   ──→ new accessToken returned in body + x-auth header
+
+Header precedence (important):
+  Protected routes read x-auth first, then Authorization: Bearer <accessToken>.
+  If both are present with different values, x-auth is used.
 ```
 
 **Token storage in MongoDB** – Both access and refresh tokens are stored inside the `User.tokens` array. This enables server-side invalidation (logout, logout-all) and prevents token reuse after logout.
@@ -245,12 +248,13 @@ Token refresh (before access token expires):
 | Layer | Implementation |
 |---|---|
 | HTTP security headers | `helmet` – CSP, HSTS (1 yr), X-Frame-Options, noSniff, XSS filter, Referrer-Policy, hidePoweredBy |
-| CORS | Strict allowlist via `FRONTEND_URL` + `CORS_ORIGINS` env vars; credentials allowed; pre-flight cached 10 min |
+| CORS | Allowlist via `FRONTEND_URL` + `CORS_ORIGINS`; in non-production also allows `localhost` / `127.0.0.1` origins on any port; credentials allowed; pre-flight cached 10 min |
 | Rate limiting (general) | 100 req / 15 min / IP on all `/api/*` routes via `express-rate-limit` |
 | Rate limiting (login) | 5 attempts / 15 min / IP on `POST /api/user/login` |
 | Password hashing | bcrypt, 12 salt rounds (configurable via `BCRYPT_SALT_ROUNDS`) |
 | JWT access tokens | HS256, `JWT_SECRET`, expires in 15 min (configurable) |
 | JWT refresh tokens | HS256, `JWT_REFRESH_SECRET` (separate secret), expires in 7 days |
+| Auth headers | Protected routes accept `Authorization: Bearer <token>` and legacy `x-auth`; refresh accepts request-body token or `x-refresh-token` |
 | Input validation | Joi schemas on all mutating endpoints, `abortEarly: false` |
 | Error handling | Centralised handler; production mode returns generic messages (no stack traces leaked) |
 | Token TTL cleanup | MongoDB TTL index on `tokens.expiresAt` – expired refresh tokens auto-removed |
@@ -457,6 +461,7 @@ This is a **pure REST API** – it has no frontend of its own. The companion fro
 - All responses are JSON (except the EJS-rendered payment portal pages).
 - Tokens are exposed in both response body and response headers (`x-auth`, `x-refresh-token`) for flexible client integration.
 - CORS is configurable to support any frontend origin via `FRONTEND_URL` / `CORS_ORIGINS`.
+- CORS allows auth-related custom headers (`x-auth`, `x-refresh-token`) in preflight for browser clients.
 - `credentials: true` is set in CORS options, so cookie-based auth from a browser is supported.
 - Pagination on all list endpoints (limit/skip/sort) keeps payloads small for mobile clients.
 - The Swagger UI (`/api-docs`) can be used directly by frontend developers to explore and test endpoints without a separate tool.
@@ -471,3 +476,5 @@ This is a **pure REST API** – it has no frontend of its own. The companion fro
 - Payment portal pages (`views/`) are served as static EJS templates but there is no dedicated route file documenting their URL structure in Swagger.
 - No file-upload endpoint despite `upload` config (max 5 MB, allowed types: JPEG, PNG, GIF, PDF) defined in `config.js`.
 - Stripe webhook handling is not implemented; payment status updates must be triggered manually.
+- User schema defines email indexing twice (`unique: true` and explicit `schema.index({ email: 1 })`), causing a duplicate-index warning at runtime.
+- Refresh-token TTL is implemented with a document-level MongoDB TTL index on `tokens.expiresAt`, which can delete whole user documents when a token expires and should be redesigned.
