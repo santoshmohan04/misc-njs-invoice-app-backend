@@ -6,6 +6,7 @@
 const customerRepository = require('../repositories/customerRepository');
 const { createSuccessResponse, createErrorResponse } = require('../helpers/responseHelper');
 const Logger = require('../utils/logger');
+const AuditService = require('./auditService');
 
 class CustomerService {
   /**
@@ -28,6 +29,14 @@ class CustomerService {
       customerData.merchant = merchantId;
 
       const customer = await customerRepository.create(customerData);
+
+      await AuditService.log({
+        actorId: merchantId,
+        action: 'customer.create',
+        entityType: 'customer',
+        entityId: customer._id.toString(),
+        metadata: { email: customer.email },
+      });
 
       Logger.info('Customer created successfully', { customerId: customer._id, merchantId });
 
@@ -82,7 +91,7 @@ class CustomerService {
 
       const customer = await customerRepository.findById(customerId);
 
-      if (!customer || customer.merchant.toString() !== merchantId) {
+      if (!customer || customer.merchant.toString() !== String(merchantId)) {
         return createErrorResponse('Customer not found', 404);
       }
 
@@ -109,7 +118,7 @@ class CustomerService {
 
       // Check if customer exists and belongs to merchant
       const existingCustomer = await customerRepository.findById(customerId);
-      if (!existingCustomer || existingCustomer.merchant.toString() !== merchantId) {
+      if (!existingCustomer || existingCustomer.merchant.toString() !== String(merchantId)) {
         return createErrorResponse('Customer not found', 404);
       }
 
@@ -124,6 +133,14 @@ class CustomerService {
       const customer = await customerRepository.updateById(customerId, updateData, {
         new: true,
         runValidators: true
+      });
+
+      await AuditService.log({
+        actorId: merchantId,
+        action: 'customer.update',
+        entityType: 'customer',
+        entityId: customerId,
+        metadata: { fields: Object.keys(updateData || {}) },
       });
 
       Logger.info('Customer updated successfully', { customerId, merchantId });
@@ -153,7 +170,7 @@ class CustomerService {
 
       // Check if customer exists and belongs to merchant
       const customer = await customerRepository.findById(customerId);
-      if (!customer || customer.merchant.toString() !== merchantId) {
+      if (!customer || customer.merchant.toString() !== String(merchantId)) {
         return createErrorResponse('Customer not found', 404);
       }
 
@@ -169,6 +186,14 @@ class CustomerService {
       }
 
       await customerRepository.deleteById(customerId);
+
+      await AuditService.log({
+        actorId: merchantId,
+        action: 'customer.delete',
+        entityType: 'customer',
+        entityId: customerId,
+        metadata: {},
+      });
 
       Logger.info('Customer deleted successfully', { customerId, merchantId });
 

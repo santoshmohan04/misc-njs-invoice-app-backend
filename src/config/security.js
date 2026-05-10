@@ -38,6 +38,7 @@ const buildAllowedOrigins = () => {
   if (origins.size === 0) {
     origins.add('http://localhost:3000');
     origins.add('http://localhost:4200');
+    origins.add('http://localhost:8081');
   }
 
   return Array.from(origins);
@@ -57,13 +58,15 @@ const helmetOptions = {
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
-      styleSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", 'data:', 'https:'],
-      connectSrc: ["'self'"],
+      connectSrc: ["'self'", 'https://api.stripe.com'],
       fontSrc: ["'self'", 'https:', 'data:'],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'"],
       frameSrc: ["'none'"],
+      formAction: ["'self'"],
+      baseUri: ["'self'"],
     },
   },
   // Prevent clickjacking – only allow framing from the same origin
@@ -89,6 +92,7 @@ const helmetOptions = {
 // ---------------------------------------------------------------------------
 
 const allowedOrigins = buildAllowedOrigins();
+const isDevelopment = process.env.NODE_ENV !== 'production';
 
 /**
  * CORS options:
@@ -106,6 +110,11 @@ const corsOptions = {
       return callback(null, true);
     }
 
+    // In development, allow localhost origins across common frontend ports.
+    if (isDevelopment && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+      return callback(null, true);
+    }
+
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
@@ -114,8 +123,24 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  exposedHeaders: ['RateLimit-Limit', 'RateLimit-Remaining', 'RateLimit-Reset'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'X-Auth',
+    'x-auth',
+    'X-Refresh-Token',
+    'x-refresh-token',
+  ],
+  exposedHeaders: [
+    'RateLimit-Limit',
+    'RateLimit-Remaining',
+    'RateLimit-Reset',
+    'X-Auth',
+    'x-auth',
+    'X-Refresh-Token',
+    'x-refresh-token',
+  ],
   maxAge: 600, // 10 minutes pre-flight cache
 };
 
@@ -162,9 +187,29 @@ const authRateLimitOptions = {
   legacyHeaders: false,
 };
 
+const userRateLimitOptions = {
+  windowMs: parseInt(process.env.API_RATE_LIMIT_WINDOW_MS, 10) || 15 * 60 * 1000,
+  max: parseInt(process.env.USER_RATE_LIMIT_MAX_REQUESTS, 10) || 60,
+  keyGenerator: (req, res) => {
+    if (req.user && req.user._id) {
+      return `user:${req.user._id.toString()}`;
+    }
+
+    // Use built-in helper for IPv6-safe normalization.
+    return rateLimit.ipKeyGenerator(req, res);
+  },
+  message: {
+    success: false,
+    message: 'Too many requests for this user. Please try again later.',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+};
+
 // Pre-built limiter instances (re-exported for use in route files)
 const apiRateLimiter = rateLimit(apiRateLimitOptions);
 const authRateLimiter = rateLimit(authRateLimitOptions);
+const userRateLimiter = rateLimit(userRateLimitOptions);
 
 // ---------------------------------------------------------------------------
 // Compression
@@ -212,6 +257,8 @@ module.exports = {
   morganFormat,
   apiRateLimiter,
   authRateLimiter,
+  userRateLimiter,
   apiRateLimitOptions,
   authRateLimitOptions,
+  userRateLimitOptions,
 };

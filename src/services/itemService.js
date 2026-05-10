@@ -82,7 +82,7 @@ class ItemService {
 
       const item = await itemRepository.findById(itemId);
 
-      if (!item || item.merchant.toString() !== merchantId) {
+      if (!item || item.merchant.toString() !== String(merchantId)) {
         return createErrorResponse('Item not found', 404);
       }
 
@@ -109,7 +109,7 @@ class ItemService {
 
       // Check if item exists and belongs to merchant
       const existingItem = await itemRepository.findById(itemId);
-      if (!existingItem || existingItem.merchant.toString() !== merchantId) {
+      if (!existingItem || existingItem.merchant.toString() !== String(merchantId)) {
         return createErrorResponse('Item not found', 404);
       }
 
@@ -153,7 +153,7 @@ class ItemService {
 
       // Check if item exists and belongs to merchant
       const item = await itemRepository.findById(itemId);
-      if (!item || item.merchant.toString() !== merchantId) {
+      if (!item || item.merchant.toString() !== String(merchantId)) {
         return createErrorResponse('Item not found', 404);
       }
 

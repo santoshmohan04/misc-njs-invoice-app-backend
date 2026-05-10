@@ -46,7 +46,7 @@ class PaymentRepository extends BaseRepository {
         $group: {
           _id: null,
           totalPayments: { $sum: 1 },
-          totalAmount: { $sum: '$amount' },
+          totalAmount: { $sum: { $ifNull: ['$amount', '$amount_paid'] } },
           successfulPayments: {
             $sum: {
               $cond: [
@@ -64,6 +64,15 @@ class PaymentRepository extends BaseRepository {
                 0
               ]
             }
+          },
+          refundedPayments: {
+            $sum: {
+              $cond: [
+                { $eq: ['$status', 'refunded'] },
+                1,
+                0
+              ]
+            }
           }
         }
       }
@@ -74,8 +83,36 @@ class PaymentRepository extends BaseRepository {
       totalPayments: 0,
       totalAmount: 0,
       successfulPayments: 0,
-      failedPayments: 0
+      failedPayments: 0,
+      refundedPayments: 0,
     };
+  }
+
+  async analyticsByDateRange(merchantId, startDate, endDate) {
+    const match = {
+      merchant: require('mongoose').Types.ObjectId(merchantId),
+    };
+
+    if (startDate || endDate) {
+      match.createdAt = {};
+      if (startDate) {
+        match.createdAt.$gte = startDate;
+      }
+      if (endDate) {
+        match.createdAt.$lte = endDate;
+      }
+    }
+
+    return this.model.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 },
+          amount: { $sum: { $ifNull: ['$amount', '$amount_paid'] } },
+        },
+      },
+    ]);
   }
 
   /**

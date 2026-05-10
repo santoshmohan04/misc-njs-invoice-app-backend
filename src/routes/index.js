@@ -12,6 +12,8 @@ const customerController = require('../controllers/customerController');
 const itemController = require('../controllers/itemController');
 const invoiceController = require('../controllers/invoiceController');
 const paymentController = require('../controllers/paymentController');
+const stripeWebhookRoutes = require('./stripeWebhook.routes');
+const reportingRoutes = require('./reporting.routes');
 
 // Import middlewares
 const { apiRateLimiter } = require('../middlewares/rateLimiter');
@@ -82,6 +84,12 @@ router.use('/api/invoice', invoiceController);
 // Payment routes
 router.use('/api/payment', paymentController);
 
+// Stripe webhook routes
+router.use('/api/webhooks', stripeWebhookRoutes);
+
+// Reporting routes
+router.use('/api/reports', reportingRoutes);
+
 /**
  * Legacy route support (for backward compatibility)
  * These routes maintain the old URL structure
@@ -101,5 +109,11 @@ router.use('/invoice', invoiceController);
 
 // Legacy payment routes
 router.use('/payment', paymentController);
+
+// Legacy webhook routes
+router.use('/webhooks', stripeWebhookRoutes);
+
+// Legacy reporting routes
+router.use('/reports', reportingRoutes);
 
 module.exports = router;

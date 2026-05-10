@@ -3,6 +3,12 @@ const Schema = mongoose.Schema
 const _ = require("lodash")
 
 const PaymentSchema = new Schema({
+    merchant: {
+        type: Schema.ObjectId,
+        ref: 'User',
+        required: false,
+        index: true,
+    },
     invoice: {
         type: Schema.ObjectId,
         ref: 'Invoice',
@@ -10,9 +16,33 @@ const PaymentSchema = new Schema({
         unique: true,
     },
     status: {
-        type: Boolean,
-        default: false,
+        type: String,
+        default: 'pending',
         required: true,
+        set: (value) => {
+            if (value === true) {
+                return 'completed';
+            }
+            if (value === false) {
+                return 'pending';
+            }
+            return value;
+        }
+    },
+    amount: {
+        min: 0,
+        type: Number,
+        required: false,
+    },
+    currency: {
+        type: String,
+        trim: true,
+        default: 'usd',
+    },
+    method: {
+        type: String,
+        trim: true,
+        default: 'card',
     },
     paid_on: {
         type: Date,
@@ -29,13 +59,34 @@ const PaymentSchema = new Schema({
         type: Number,
         required: true,
     },
+    stripePaymentIntentId: {
+        type: String,
+        required: false,
+        index: true,
+    },
+    lastWebhookEventId: {
+        type: String,
+        required: false,
+        index: true,
+    },
+    processedAt: {
+        type: Date,
+        required: false,
+    },
+    refundedAt: {
+        type: Date,
+        required: false,
+    },
 
-})
+}, { timestamps: true })
+
+PaymentSchema.index({ merchant: 1, createdAt: -1 });
+PaymentSchema.index({ status: 1, createdAt: -1 });
 
 PaymentSchema.methods.toJSON = function () {
     const item = this;
     const itemObject = item.toObject();
-    return _.pick(itemObject, ["_id", "invoice", "status", "paid_on", "amount_paid", "amount_due"]);
+    return _.pick(itemObject, ["_id", "merchant", "invoice", "status", "amount", "currency", "method", "paid_on", "amount_paid", "amount_due", "stripePaymentIntentId", "processedAt", "refundedAt", "createdAt", "updatedAt"]);
 }
 
 const Payment = mongoose.model('Payment', PaymentSchema, 'payments')

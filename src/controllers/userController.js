@@ -8,12 +8,14 @@ const router = express.Router();
 
 // Services
 const AuthService = require('../services/authService');
+const config = require('../config/config');
 
 // Middlewares
 const { authenticate } = require('../middlewares/authenticate');
 const validate = require('../middlewares/validate');
 const { loginRateLimiter } = require('../middlewares/rateLimiter');
 const asyncHandler = require('../helpers/asyncHandler');
+const { extractRefreshToken } = require('../utils/authUtils');
 
 // Validation schemas
 const { registerSchema, loginSchema, editSchema } = require('../validations/userValidations');
@@ -87,7 +89,7 @@ router.post('/register', validate(registerSchema), asyncHandler(async (req, res)
     base_currency: req.body.base_currency,
   };
 
-  const result = await AuthService.register(userData);
+  const result = await AuthService.register(userData, req);
 
   if (!result.success) {
     return sendError(res, result.message, result.statusCode);
@@ -96,6 +98,23 @@ router.post('/register', validate(registerSchema), asyncHandler(async (req, res)
   // Set tokens in headers for backward compatibility
   res.header('x-auth', result.data.accessToken);
   res.header('x-refresh-token', result.data.refreshToken);
+
+  // Optional secure cookie strategy for browser clients.
+  res.cookie('accessToken', result.data.accessToken, {
+    httpOnly: true,
+    secure: config.auth.cookies.secure,
+    sameSite: config.auth.cookies.sameSite,
+    domain: config.auth.cookies.domain,
+    maxAge: config.jwt.accessExpirationMs,
+  });
+
+  res.cookie('refreshToken', result.data.refreshToken, {
+    httpOnly: true,
+    secure: config.auth.cookies.secure,
+    sameSite: config.auth.cookies.sameSite,
+    domain: config.auth.cookies.domain,
+    maxAge: config.jwt.refreshExpirationMs,
+  });
 
   sendSuccess(res, result.data, result.message, result.statusCode);
 }));
@@ -157,7 +176,7 @@ router.post('/register', validate(registerSchema), asyncHandler(async (req, res)
  *         $ref: '#/components/responses/ServerError'
  */
 router.post('/login', loginRateLimiter, validate(loginSchema), asyncHandler(async (req, res) => {
-  const result = await AuthService.login(req.body.email, req.body.password);
+  const result = await AuthService.login(req.body.email, req.body.password, req);
 
   if (!result.success) {
     return sendError(res, result.message, result.statusCode);
@@ -166,6 +185,22 @@ router.post('/login', loginRateLimiter, validate(loginSchema), asyncHandler(asyn
   // Set tokens in headers for backward compatibility
   res.header('x-auth', result.data.accessToken);
   res.header('x-refresh-token', result.data.refreshToken);
+
+  res.cookie('accessToken', result.data.accessToken, {
+    httpOnly: true,
+    secure: config.auth.cookies.secure,
+    sameSite: config.auth.cookies.sameSite,
+    domain: config.auth.cookies.domain,
+    maxAge: config.jwt.accessExpirationMs,
+  });
+
+  res.cookie('refreshToken', result.data.refreshToken, {
+    httpOnly: true,
+    secure: config.auth.cookies.secure,
+    sameSite: config.auth.cookies.sameSite,
+    domain: config.auth.cookies.domain,
+    maxAge: config.jwt.refreshExpirationMs,
+  });
 
   sendSuccess(res, result.data, result.message);
 }));
@@ -224,13 +259,13 @@ router.post('/login', loginRateLimiter, validate(loginSchema), asyncHandler(asyn
  *         $ref: '#/components/responses/ServerError'
  */
 router.post('/refresh', asyncHandler(async (req, res) => {
-  const refreshToken = req.body.refreshToken || req.header('x-refresh-token');
+  const refreshToken = extractRefreshToken(req);
 
   if (!refreshToken) {
     return sendError(res, 'Refresh token is required', 400);
   }
 
-  const result = await AuthService.refreshToken(refreshToken);
+  const result = await AuthService.refreshToken(refreshToken, req);
 
   if (!result.success) {
     return sendError(res, result.message, result.statusCode);
@@ -238,6 +273,13 @@ router.post('/refresh', asyncHandler(async (req, res) => {
 
   // Set new access token in header
   res.header('x-auth', result.data.accessToken);
+  res.cookie('accessToken', result.data.accessToken, {
+    httpOnly: true,
+    secure: config.auth.cookies.secure,
+    sameSite: config.auth.cookies.sameSite,
+    domain: config.auth.cookies.domain,
+    maxAge: config.jwt.accessExpirationMs,
+  });
 
   sendSuccess(res, result.data, result.message);
 }));
@@ -322,11 +364,24 @@ router.post('/edit', authenticate, validate(editSchema), asyncHandler(async (req
  *         $ref: '#/components/responses/ServerError'
  */
 router.delete('/logout', authenticate, asyncHandler(async (req, res) => {
-  const result = await AuthService.logout(req.user._id, req.token);
+  const result = await AuthService.logout(req.user._id, req.token, extractRefreshToken(req), req);
 
   if (!result.success) {
     return sendError(res, result.message, result.statusCode);
   }
+
+  res.clearCookie('accessToken', {
+    httpOnly: true,
+    secure: config.auth.cookies.secure,
+    sameSite: config.auth.cookies.sameSite,
+    domain: config.auth.cookies.domain,
+  });
+  res.clearCookie('refreshToken', {
+    httpOnly: true,
+    secure: config.auth.cookies.secure,
+    sameSite: config.auth.cookies.sameSite,
+    domain: config.auth.cookies.domain,
+  });
 
   sendSuccess(res, result.data, result.message);
 }));
@@ -354,11 +409,24 @@ router.delete('/logout', authenticate, asyncHandler(async (req, res) => {
  *         $ref: '#/components/responses/ServerError'
  */
 router.delete('/logout-all', authenticate, asyncHandler(async (req, res) => {
-  const result = await AuthService.logoutAll(req.user._id);
+  const result = await AuthService.logoutAll(req.user._id, req);
 
   if (!result.success) {
     return sendError(res, result.message, result.statusCode);
   }
+
+  res.clearCookie('accessToken', {
+    httpOnly: true,
+    secure: config.auth.cookies.secure,
+    sameSite: config.auth.cookies.sameSite,
+    domain: config.auth.cookies.domain,
+  });
+  res.clearCookie('refreshToken', {
+    httpOnly: true,
+    secure: config.auth.cookies.secure,
+    sameSite: config.auth.cookies.sameSite,
+    domain: config.auth.cookies.domain,
+  });
 
   sendSuccess(res, result.data, result.message);
 }));

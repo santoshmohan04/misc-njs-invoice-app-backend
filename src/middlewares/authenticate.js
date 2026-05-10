@@ -1,5 +1,7 @@
 const { User } = require("../../models/user");
 const { extractToken, createErrorResponse } = require("../utils/authUtils");
+const config = require('../config/config');
+const Logger = require('../utils/logger');
 
 /**
  * Authentication middleware
@@ -18,6 +20,28 @@ const authenticate = async (req, res, next) => {
     if (!user) {
       return res.status(401).json(createErrorResponse("Invalid token.", 401));
     }
+
+    if (user.lastActivityAt) {
+      const inactivityMs = Date.now() - new Date(user.lastActivityAt).getTime();
+      if (inactivityMs > config.auth.inactivityTimeoutMs) {
+        return res.status(401).json(createErrorResponse('Session expired due to inactivity.', 401));
+      }
+    }
+
+    const currentIp = req.ip;
+    const currentUserAgent = req.get('User-Agent');
+    if (user.lastLoginIp && user.lastLoginIp !== currentIp) {
+      Logger.warn('suspicious.login.ip_change', {
+        userId: user._id,
+        previousIp: user.lastLoginIp,
+        currentIp,
+      });
+    }
+
+    user.lastActivityAt = new Date();
+    user.lastLoginIp = currentIp;
+    user.lastUserAgent = currentUserAgent;
+    await user.save();
 
     // Attach user and token to request object
     req.user = user;

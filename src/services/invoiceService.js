@@ -7,6 +7,8 @@ const invoiceRepository = require('../repositories/invoiceRepository');
 const customerRepository = require('../repositories/customerRepository');
 const { createSuccessResponse, createErrorResponse } = require('../helpers/responseHelper');
 const Logger = require('../utils/logger');
+const storage = require('../config/storage');
+const AuditService = require('./auditService');
 
 class InvoiceService {
   /**
@@ -21,7 +23,7 @@ class InvoiceService {
 
       // Validate customer exists and belongs to merchant
       const customer = await customerRepository.findById(invoiceData.customer);
-      if (!customer || customer.merchant.toString() !== merchantId) {
+      if (!customer || customer.merchant.toString() !== String(merchantId)) {
         return createErrorResponse('Customer not found', 404);
       }
 
@@ -40,6 +42,14 @@ class InvoiceService {
       } else {
         Logger.info('Existing invoice updated', { invoiceId: invoice._id });
       }
+
+      await AuditService.log({
+        actorId: merchantId,
+        action: invoice.lastErrorObject?.updatedExisting ? 'invoice.update' : 'invoice.create',
+        entityType: 'invoice',
+        entityId: invoice._id.toString(),
+        metadata: { number: invoice.number, customer: invoiceData.customer },
+      });
 
       return createSuccessResponse({ invoice }, 'Invoice updated successfully');
 
@@ -113,7 +123,6 @@ class InvoiceService {
 
       // Generate PDF using pdf-invoice library
       const pdfInvoice = require('pdf-invoice');
-      const path = require('path');
       const fs = require('fs');
 
       const document = pdfInvoice({
@@ -137,7 +146,7 @@ class InvoiceService {
 
       // Generate and save PDF
       document.generate();
-      const outputPath = path.join(path.resolve('attachments'), 'invoice.pdf');
+      const outputPath = await storage.createTempPdfPath('invoice');
       const writeStream = fs.createWriteStream(outputPath);
 
       await new Promise((resolve, reject) => {
@@ -203,6 +212,8 @@ class InvoiceService {
       };
 
       await transporter.sendMail(mailOptions);
+
+      await storage.cleanupFile(pdfResult.data.pdfPath);
 
       Logger.info('Invoice email sent successfully', { paymentId, customerEmail: invoice.customer.email });
 

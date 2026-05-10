@@ -1,17 +1,20 @@
 const Joi = require('joi');
+const { sendValidationError } = require('../helpers/responseHelper');
 
-const validate = (schema) => {
+const validate = (schema, source = 'body') => {
   return (req, res, next) => {
-    const { error } = schema.validate(req.body, { abortEarly: false });
+    const payload = req[source];
+    const { error, value } = schema.validate(payload, {
+      abortEarly: false,
+      stripUnknown: true,
+    });
     
     if (error) {
       const errors = error.details.map((detail) => detail.message);
-      return res.status(400).json({
-        success: false,
-        message: "Validation failed",
-        errors
-      });
+      return sendValidationError(res, errors);
     }
+
+    req[source] = value;
     next();
   };
 };

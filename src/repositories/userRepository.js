@@ -5,7 +5,7 @@
 
 const { User } = require('../../models/user');
 const BaseRepository = require('./baseRepository');
-const { comparePassword } = require('../utils/authUtils');
+const refreshTokenRepository = require('./refreshTokenRepository');
 
 class UserRepository extends BaseRepository {
   constructor() {
@@ -80,11 +80,12 @@ class UserRepository extends BaseRepository {
         throw new Error('Invalid token type');
       }
 
-      const user = await this.findOne({
-        "_id": decoded._id,
-        "tokens.token": refreshToken,
-        "tokens.access": "refresh",
-      });
+      const tokenDoc = await refreshTokenRepository.findActiveToken(refreshToken);
+      if (!tokenDoc || tokenDoc.userId.toString() !== decoded._id.toString()) {
+        throw new Error('Refresh token not found');
+      }
+
+      const user = await this.findOne({ _id: decoded._id });
 
       if (!user) {
         throw new Error('User not found');
@@ -117,6 +118,7 @@ class UserRepository extends BaseRepository {
     const user = await this.findById(userId);
     if (user) {
       user.tokens = user.tokens.filter(t => t.token !== token);
+      await refreshTokenRepository.revokeToken(token, { reason: 'logout' });
       return await user.save();
     }
     return null;
@@ -131,6 +133,7 @@ class UserRepository extends BaseRepository {
     const user = await this.findById(userId);
     if (user) {
       user.tokens = [];
+      await refreshTokenRepository.revokeByUser(userId, { reason: 'logout-all' });
       return await user.save();
     }
     return null;

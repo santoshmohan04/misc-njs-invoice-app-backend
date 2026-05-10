@@ -1,9 +1,9 @@
 const mongoose = require("mongoose");
 const Schema = mongoose.Schema;
 const jwt = require("jsonwebtoken");
-const bcrypt = require("bcrypt");
 const _ = require("lodash");
 const { hashPassword, comparePassword, generateAccessToken, generateRefreshToken } = require("../src/utils/authUtils");
+const { AUTH_CONSTANTS } = require('../src/constants/api.constants');
 
 // JWT Configuration from environment
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -70,9 +70,36 @@ const UserSchema = new Schema({
             required: false // Only for refresh tokens
         }
     }],
+    role: {
+        type: String,
+        enum: Object.values(AUTH_CONSTANTS.ROLES),
+        default: AUTH_CONSTANTS.ROLES.OWNER,
+        index: true,
+    },
+    permissions: [{
+        type: String,
+        trim: true,
+    }],
+    organizationId: {
+        type: Schema.ObjectId,
+        required: false,
+        index: true,
+    },
     lastLogin: {
         type: Date,
         default: null
+    },
+    lastActivityAt: {
+        type: Date,
+        default: null,
+    },
+    lastLoginIp: {
+        type: String,
+        default: null,
+    },
+    lastUserAgent: {
+        type: String,
+        default: null,
     },
     loginAttempts: {
         type: Number,
@@ -94,14 +121,11 @@ UserSchema.virtual('isLocked').get(function() {
 // Index for email lookups
 UserSchema.index({ email: 1 });
 
-// Index for token cleanup (TTL index for expired refresh tokens)
-UserSchema.index({ "tokens.expiresAt": 1 }, { expireAfterSeconds: 0 });
-
 // Instance method to return user object without sensitive data
 UserSchema.methods.toJSON = function () {
     const user = this;
     const userObject = user.toObject();
-    return _.pick(userObject, ["_id", "email", "name", "company", "phone", "address", "base_currency", "lastLogin", "createdAt", "updatedAt"]);
+    return _.pick(userObject, ["_id", "email", "name", "company", "phone", "address", "base_currency", "role", "permissions", "organizationId", "lastLogin", "lastActivityAt", "createdAt", "updatedAt"]);
 };
 
 // Instance method to generate access token
@@ -174,6 +198,7 @@ UserSchema.methods.removeAllTokens = async function () {
 // Instance method to update last login
 UserSchema.methods.updateLastLogin = async function () {
     this.lastLogin = new Date();
+    this.lastActivityAt = new Date();
     this.loginAttempts = 0; // Reset login attempts on successful login
     this.lockUntil = null; // Unlock account
     return this.save();
