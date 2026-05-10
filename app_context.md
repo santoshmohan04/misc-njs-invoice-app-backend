@@ -1,71 +1,80 @@
-# Invoice App Backend – Application Context
+# Invoice App Backend - Application Context
 
-A comprehensive reference for product development covering architecture, features, APIs, authentication, security, data models, and packages.
+A current reference for the backend's runtime architecture, routes, security model, data shapes, and dependencies.
 
 ---
 
 ## 1. Overview
 
-**Invoice App Backend** is a multi-tenant REST API built with Node.js and Express. It allows small-business merchants to:
+**Invoice App Backend** is a multi-tenant Node.js and Express REST API for small-business merchants. It supports:
 
-- Register and manage their own account (profile, currency, contact info)
-- Maintain a catalogue of products/services (items)
-- Manage their customer directory
-- Create, store, and email invoices as PDFs
-- Accept and track card payments via Stripe
+- Merchant registration, login, profile updates, and session logout
+- Customer, item, invoice, and payment management scoped to the authenticated merchant
+- Invoice PDF generation and email delivery
+- Stripe payment processing and Stripe webhook reconciliation
+- Reporting and analytics for invoices, revenue, payments, and customers
 
-Each merchant's data is fully isolated: all resources (customers, items, invoices, payments) are scoped to the authenticated merchant's ID, so one merchant can never see another merchant's data.
+Merchant data is isolated by ownership checks in the service and repository layers, so one merchant cannot read another merchant's records.
 
 ---
 
 ## 2. Architecture
 
 ```
-server.js               Entry point, graceful shutdown, uncaught-exception handling
+server.js               Entry point, graceful shutdown, uncaught exception handling
 src/
-  app.js                Express app factory (DB connect, middleware, routes, error handling)
+  app.js                Express app bootstrap (DB connect, middleware, routes, error handling)
   config/
-    config.js           Centralised environment config + startup validation
-    security.js         Helmet, CORS, rate-limit, compression, Morgan settings
-    swagger.js          OpenAPI 3.0 spec built from JSDoc + swagger-ui-express setup
+    config.js           Environment config, validation, auth and security settings
+    security.js         Helmet, CORS, rate limiting, compression, Morgan settings
+    swagger.js          OpenAPI 3.0 spec built from JSDoc + swagger-ui-express
+    storage.js          Attachment file helpers and temporary PDF cleanup helpers
   routes/
-    index.js            Route registration – /health, /api/*, legacy routes (no /api prefix)
-  controllers/          Thin Express routers; delegate to services
-  services/             Business logic (AuthService, CustomerService, ItemService,
-                        InvoiceService, PaymentService)
-  repositories/         Mongoose query layer (baseRepository + per-domain repos)
+    index.js            Route registration for /health, /api/*, and legacy routes
+    reporting.routes.js  Reporting route mount
+    stripeWebhook.routes.js  Stripe webhook route mount
+  controllers/          Thin Express routers that delegate to services
+  services/             Business logic for auth, customers, items, invoices, payments, reporting, webhooks
+  repositories/         Mongoose query layer plus base repository helpers
   middlewares/
-    authenticate.js     JWT auth guard (authenticate, optionalAuthenticate, authenticateAdmin)
-    validate.js         Joi schema validation middleware
-    rateLimiter.js      Re-exports pre-built express-rate-limit instances
-    errorHandler.js     Centralised error + 404 handlers; asyncHandler wrapper
+    authenticate.js     Access-token auth, optional auth, and admin alias
+    authorization.js    Role and permission guards
+    validate.js         Joi validation middleware
+    rateLimiter.js      Re-exports configured rate limiters
+    errorHandler.js     Centralised 404 and error handling
+    requestContext.js   Correlation ID and request timing context
   helpers/
-    asyncHandler.js     Wraps async controllers to auto-propagate errors to Express
-    responseHelper.js   sendSuccess / sendError / createSuccessResponse / createErrorResponse
+    asyncHandler.js     Async route wrapper
+    responseHelper.js   Success and error response helpers
   utils/
-    authUtils.js        JWT generate/verify helpers, bcrypt hash/compare
-    logger.js           Winston logger (console dev, file prod) + HTTP request logging
-  validations/          Per-resource Joi schemas
+    authUtils.js        JWT helpers, bcrypt helpers, token extraction
+    logger.js           Winston logging
+  validations/          Joi schemas by resource
+  auth/
+    rbac.js             Role and permission checks
   docs/
-    API.md              Quick API reference
-views/                  EJS templates for the payment portal static pages
-attachments/            Runtime PDF output directory (invoice.pdf generated on demand)
-controllers/ (root)     Legacy controllers (still in use via route registration)
-models/ (root)          Legacy Mongoose models (User, Customer, Item, Invoice, Payment)
+    API.md              Human-readable API reference
+views/                  EJS payment portal pages
+attachments/            Generated invoice PDFs and cleanup targets
+models/                 Current Mongoose models
+controllers/            Legacy root controllers still present in the repo
 ```
 
 ### Data flow
+
 ```
-HTTP Request
-  → Rate limiter (express-rate-limit)
-  → Helmet / CORS / Compression / Morgan
-  → Authenticate middleware (JWT verification, protected routes only)
-  → Joi Validate middleware (routes with validation schemas)
-  → Controller (router)
-  → Service (business logic)
-  → Repository (Mongoose queries)
-  → MongoDB Atlas
-  ← JSON response via responseHelper
+HTTP request
+  -> Rate limiter
+  -> Helmet / CORS / Compression / Morgan
+  -> requestContext
+  -> Authentication middleware for protected routes
+  -> Authorization middleware where permissions are required
+  -> Joi validation middleware
+  -> Controller
+  -> Service
+  -> Repository
+  -> MongoDB, Stripe, Nodemailer, or pdf-invoice
+  <- JSON response via responseHelper
 ```
 
 ---
@@ -75,76 +84,84 @@ HTTP Request
 ### 3.1 Authentication
 | Feature | Detail |
 |---|---|
-| Registration | Creates merchant account, returns access + refresh token pair |
-| Login | Email + password, returns token pair; brute-force protected |
-| Token refresh | Issues a new access token from a valid refresh token (no re-login) |
-| Logout (current) | Invalidates the current access token only |
-| Logout all | Clears all stored tokens for the user (all devices) |
-| Token verify | Validates a token and returns the associated user data |
-| Get profile | Returns the authenticated merchant's public profile |
-| Edit profile | Updates company, phone, address, base_currency |
+| Registration | Creates a merchant account and returns access and refresh tokens |
+| Login | Email and password login with brute-force protection |
+| Token refresh | Issues a new access token from a valid refresh token |
+| Logout current | Revokes the current access token and refresh token session when present |
+| Logout all | Removes all stored tokens for the user and revokes refresh tokens |
+| Token verify | Validates a token and returns the associated user payload |
+| Get profile | Returns the authenticated merchant profile |
+| Edit profile | Updates company, phone, address, and base_currency |
+| Cookie auth support | Access and refresh tokens can be stored in httpOnly cookies for browser clients |
 
 ### 3.2 Customer Management
 | Feature | Detail |
 |---|---|
 | Create customer | Linked to the authenticated merchant |
-| List all customers | Paginated (limit/skip/sort query params) |
-| Get customer by ID | Ownership-checked |
+| List all customers | Paginated with limit, skip, and sort query params |
+| Get customer by ID | Ownership checked |
 | Update customer | Partial or full update |
 | Delete customer | Permanent deletion |
-| Customer statistics | Aggregated overview (total count, etc.) |
+| Customer statistics | Aggregated overview |
 
 ### 3.3 Item Catalogue
 | Feature | Detail |
 |---|---|
-| Create item | Adds product/service with name, price, category, quantity |
+| Create item | Adds a product or service with name and price |
 | List all items | Paginated |
-| Get item by ID | Ownership-checked |
+| Get item by ID | Ownership checked |
 | Update item | Partial or full update |
 | Delete item | Permanent deletion |
-| Search items | Full-text match on name, description, category |
-| Filter by category | Returns items in a given category |
+| Search items | Search endpoint by query string |
+| Filter by category | Returns items in a category |
 
 ### 3.4 Invoice Management
 | Feature | Detail |
 |---|---|
-| Create / Update invoice | Upsert by invoice number; validates customer ownership |
+| Create or update invoice | Upsert by invoice number and validate customer ownership |
 | List all invoices | Returns all invoices for the merchant |
-| Invoice statistics | Totals, outstanding amounts, etc. |
-| Send invoice by email | Generates PDF via `pdf-invoice`, emails to customer with payment link |
+| Invoice statistics | Totals and outstanding amounts |
+| Send invoice by email | Generates a PDF, sends email, and includes a payment link |
 
 ### 3.5 Payment Processing
 | Feature | Detail |
 |---|---|
-| Create payment record | Linked to an invoice; defaults to `pending` status |
+| Create payment record | Linked to an invoice and usually starts in pending status |
 | List all payments | Paginated |
-| Get payment by ID | Ownership-checked |
-| Update payment status | Manual status change (pending / completed / failed / cancelled) |
-| Process payment (Stripe) | Charges card via Stripe PaymentIntents API |
-| Payment statistics | Total collected, pending, failed amounts |
-| Filter by status | Returns payments matching a given status |
+| Get payment by ID | Ownership checked |
+| Update payment status | Manual status change |
+| Process payment | Charges via Stripe PaymentIntents |
+| Payment statistics | Aggregated totals by status |
+| Filter by status | Returns payments matching a status |
+| Webhook reconciliation | Stripe webhooks update completed, failed, or refunded states |
 
-### 3.6 Health Check
-- `GET /health` – Returns server status, environment, version, timestamp. No authentication required.
+### 3.6 Reporting
+| Feature | Detail |
+|---|---|
+| Invoice aging | Aging buckets for invoices |
+| Revenue | Revenue analytics |
+| Payments | Payment status analytics |
+| Top customers | Customer ranking by activity or value |
+| Monthly trends | Time series trend data |
+| Outstanding balances | Open balances summary |
+
+### 3.7 Health Check
+- `GET /health` returns server status, environment, version, and timestamp without authentication.
 
 ---
 
 ## 4. API Reference
 
-**Base URL:** `http://localhost:3333` (dev) | `https://api.invoiceapp.example.com` (prod)  
-**Interactive docs:** `GET /api-docs` (Swagger UI)
+**Base URL:** `http://localhost:3333` in development  
+**Interactive docs:** `GET /api-docs`
 
-All protected endpoints require:
-```
-Authorization: Bearer <access_token>
-```
-or the legacy header `x-auth: <access_token>`.
+Protected endpoints accept the access token through `x-auth`, `Authorization: Bearer <token>`, or browser cookies when cookie auth is enabled.
 
-### Authentication – `/api/user`
+### Authentication - `/api/user`
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | POST | `/api/user/register` | Public | Create merchant account |
-| POST | `/api/user/login` | Public (rate-limited) | Login, receive token pair |
+| POST | `/api/user/login` | Public, rate-limited | Login and receive token pair |
 | POST | `/api/user/refresh` | Public | Refresh access token |
 | POST | `/api/user/verify` | Public | Validate a token |
 | GET | `/api/user/user` | Required | Get current user profile |
@@ -152,94 +169,103 @@ or the legacy header `x-auth: <access_token>`.
 | DELETE | `/api/user/logout` | Required | Logout current session |
 | DELETE | `/api/user/logout-all` | Required | Logout all sessions |
 
-### Customers – `/api/customer`
+### Customers - `/api/customer`
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | POST | `/api/customer/create` | Required | Create customer |
-| GET | `/api/customer/all` | Required | List all customers |
+| GET | `/api/customer/all` | Required | List customers |
 | GET | `/api/customer/:id` | Required | Get customer by ID |
 | PUT | `/api/customer/:id` | Required | Update customer |
 | DELETE | `/api/customer/:id` | Required | Delete customer |
 | GET | `/api/customer/statistics/overview` | Required | Customer stats |
 
-### Items – `/api/item`
+### Items - `/api/item`
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | POST | `/api/item/create` | Required | Create item |
-| GET | `/api/item/all` | Required | List all items |
+| GET | `/api/item/all` | Required | List items |
 | GET | `/api/item/search?q=<term>` | Required | Search items |
 | GET | `/api/item/category/:category` | Required | Items by category |
 | GET | `/api/item/:id` | Required | Get item by ID |
 | PUT | `/api/item/:id` | Required | Update item |
 | DELETE | `/api/item/:id` | Required | Delete item |
 
-### Invoices – `/api/invoice`
+### Invoices - `/api/invoice`
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | POST | `/api/invoice/edit` | Required | Create or update invoice |
-| GET | `/api/invoice/all` | Required | List all invoices |
+| GET | `/api/invoice/all` | Required | List invoices |
 | POST | `/api/invoice/send` | Required | Email invoice PDF to customer |
 | GET | `/api/invoice/statistics` | Required | Invoice statistics |
 
-### Payments – `/api/payment`
+### Payments - `/api/payment`
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | POST | `/api/payment/create` | Required | Create payment record |
-| GET | `/api/payment/all` | Required | List all payments |
+| GET | `/api/payment/all` | Required | List payments |
 | GET | `/api/payment/statistics/overview` | Required | Payment statistics |
 | GET | `/api/payment/status/:status` | Required | Payments by status |
 | GET | `/api/payment/:id` | Required | Get payment by ID |
 | PUT | `/api/payment/:id/status` | Required | Update payment status |
 | POST | `/api/payment/:id/process` | Required | Process payment via Stripe |
 
-> **Legacy routes** (without the `/api` prefix) are also registered for backward compatibility, e.g. `POST /user/register`, `GET /customer/all`, etc.
+### Reporting - `/api/reports`
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/reports/invoice-aging` | Required | Invoice aging analytics |
+| GET | `/api/reports/revenue` | Required | Revenue analytics |
+| GET | `/api/reports/payments` | Required | Payment analytics |
+| GET | `/api/reports/top-customers` | Required | Top customers |
+| GET | `/api/reports/monthly-trends` | Required | Monthly trends |
+| GET | `/api/reports/outstanding-balances` | Required | Outstanding balances |
 
-### Pagination (list endpoints)
+### Webhooks - `/api/webhooks`
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/webhooks/stripe` | Stripe signature required | Process Stripe webhook events |
+
+> Legacy routes without `/api` are also registered for backward compatibility, including `/user/*`, `/customer/*`, `/item/*`, `/invoice/*`, `/payment/*`, `/reports/*`, and `/webhooks/stripe`.
+
+### Pagination
 | Query param | Default | Description |
 |---|---|---|
-| `limit` | `50` | Max records to return (1–200) |
+| `limit` | `50` | Maximum records to return |
 | `skip` | `0` | Records to skip |
-| `sort` | `-createdAt` | Field + direction (prefix `-` for desc) |
+| `sort` | `-createdAt` | Sort field and direction |
 
 ### Uniform response envelope
-```json
-// Success
-{ "success": true, "message": "Operation successful", "data": { … } }
 
-// Error
-{ "success": false, "message": "Description", "errors": [ … ] }
-```
+Responses include `success`, `message`, `data` when present, `statusCode`, and `meta` with a timestamp and correlation ID. Error responses also include `errors` when validation or downstream failures provide details.
 
 ---
 
-## 5. Authentication & Token Flow
+## 5. Authentication and Token Flow
 
 ```
-POST /api/user/register  ──→  accessToken (15 min) + refreshToken (7 days)
-POST /api/user/login     ──→  accessToken (15 min) + refreshToken (7 days)
-
-Tokens returned:
-  - Response body: { data: { accessToken, refreshToken } }
-  - Response headers: x-auth, x-refresh-token (backward compat.)
-
-Protected request:
-  Authorization: Bearer <accessToken>
-  or
-  x-auth: <accessToken>
-
-Token refresh (before access token expires):
-  POST /api/user/refresh  body: { refreshToken }
-  or header: x-refresh-token: <refreshToken>
-  ──→ new accessToken returned in body + x-auth header
-
-Header precedence (important):
-  Protected routes read x-auth first, then Authorization: Bearer <accessToken>.
-  If both are present with different values, x-auth is used.
+POST /api/user/register -> accessToken + refreshToken
+POST /api/user/login    -> accessToken + refreshToken
+POST /api/user/refresh  -> new accessToken
 ```
 
-**Token storage in MongoDB** – Both access and refresh tokens are stored inside the `User.tokens` array. This enables server-side invalidation (logout, logout-all) and prevents token reuse after logout.
+Tokens are returned in the JSON body and also written to `x-auth` and `x-refresh-token` headers. The controller also sets `accessToken` and `refreshToken` httpOnly cookies for browser clients when cookie auth is enabled.
 
-**Account lock** – After 5 consecutive failed login attempts the account is locked for 2 hours (`lockUntil`). The lock is cleared automatically on the next successful login.
+Token extraction order in the active middleware is:
+
+1. `accessToken` cookie when cookie or hybrid auth is enabled
+2. `x-auth` header when header or hybrid auth is enabled
+3. `Authorization: Bearer <token>` header
+
+Refresh token extraction order is:
+
+1. `refreshToken` cookie when cookie or hybrid auth is enabled
+2. Request body `refreshToken`
+3. `x-refresh-token` header
+
+Access tokens are persisted in the `User.tokens` array for backward-compatible auth checks. Refresh tokens are stored in the dedicated `refresh_tokens` collection and are also mirrored into the user document during the migration period. Logout revokes the current refresh token when available, and logout-all revokes all refresh tokens for the user.
+
+The default inactivity timeout is 30 minutes. After that, authenticated requests are rejected even if the JWT is still valid.
+
+Login lockout is enforced after 5 failed attempts and lasts 2 hours. Successful login resets the counter and clears the lock.
 
 ---
 
@@ -247,102 +273,139 @@ Header precedence (important):
 
 | Layer | Implementation |
 |---|---|
-| HTTP security headers | `helmet` – CSP, HSTS (1 yr), X-Frame-Options, noSniff, XSS filter, Referrer-Policy, hidePoweredBy |
-| CORS | Allowlist via `FRONTEND_URL` + `CORS_ORIGINS`; in non-production also allows `localhost` / `127.0.0.1` origins on any port; credentials allowed; pre-flight cached 10 min |
-| Rate limiting (general) | 100 req / 15 min / IP on all `/api/*` routes via `express-rate-limit` |
-| Rate limiting (login) | 5 attempts / 15 min / IP on `POST /api/user/login` |
-| Password hashing | bcrypt, 12 salt rounds (configurable via `BCRYPT_SALT_ROUNDS`) |
-| JWT access tokens | HS256, `JWT_SECRET`, expires in 15 min (configurable) |
-| JWT refresh tokens | HS256, `JWT_REFRESH_SECRET` (separate secret), expires in 7 days |
-| Auth headers | Protected routes accept `Authorization: Bearer <token>` and legacy `x-auth`; refresh accepts request-body token or `x-refresh-token` |
-| Input validation | Joi schemas on all mutating endpoints, `abortEarly: false` |
-| Error handling | Centralised handler; production mode returns generic messages (no stack traces leaked) |
-| Token TTL cleanup | MongoDB TTL index on `tokens.expiresAt` – expired refresh tokens auto-removed |
-| Sensitive data | `toJSON()` strips password and tokens array from all user objects |
-| Proxy trust | `trust proxy: 1` enabled when `TRUST_PROXY=true` or `NODE_ENV=production` |
-| X-Powered-By | Disabled (both via `app.disable` and Helmet's `hidePoweredBy`) |
-| Swagger CSP | `/api-docs` uses a relaxed CSP (inline scripts/styles) scoped only to that path |
+| HTTP security headers | Helmet with CSP, HSTS, frameguard, noSniff, referrer policy, hidePoweredBy |
+| CORS | Allowlist from `FRONTEND_URL` and `CORS_ORIGINS`; localhost origins are allowed in development; credentials are enabled; custom auth headers are allowed |
+| Rate limiting | 100 requests per 15 minutes for `/api/*`, 5 login attempts per 15 minutes, and a user-scoped limiter for authenticated requests |
+| Password hashing | bcrypt with 12 salt rounds by default |
+| JWT access tokens | HS256 signed with `JWT_SECRET` |
+| JWT refresh tokens | HS256 signed with `JWT_REFRESH_SECRET` |
+| Auth strategy | `header`, `cookie`, or `hybrid` via `AUTH_STRATEGY` |
+| Session timeout | Controlled by `AUTH_INACTIVITY_TIMEOUT_MS` |
+| Input validation | Joi schemas on mutating endpoints |
+| Error handling | Centralised error handler with generic production fallback |
+| Proxy trust | Controlled by `TRUST_PROXY` and production defaults |
+| X-Powered-By | Disabled in Express and Helmet |
+| Swagger CSP | Relaxed only for `/api-docs` |
+| Webhook verification | Stripe webhook signatures are required on `/api/webhooks/stripe` |
+| Refresh token cleanup | Separate TTL-backed `refresh_tokens` collection plus scheduled cleanup jobs |
+
+The config file also defines upload limits, but no active upload route exists yet.
 
 ---
 
 ## 7. Data Models
 
-### User (merchant)
+### User
 | Field | Type | Notes |
 |---|---|---|
 | `_id` | ObjectId | Auto |
-| `name` | String | min 4 chars, required |
-| `email` | String | unique, required |
-| `password` | String | bcrypt hash, never returned in API responses |
-| `company` | String | optional |
-| `phone` | String | required |
-| `address` | String | required |
-| `base_currency` | String | e.g. `USD` |
-| `tokens` | Array | `{ access: 'auth'|'refresh', token, createdAt, expiresAt }` |
-| `lastLogin` | Date | Updated on each successful login |
-| `loginAttempts` | Number | Reset after successful login |
-| `lockUntil` | Date | Set to +2 h after 5 failed attempts |
+| `name` | String | Required, min length 4 |
+| `email` | String | Unique, required |
+| `password` | String | Hashed with bcrypt |
+| `company` | String | Optional |
+| `phone` | String | Required |
+| `address` | String | Required |
+| `base_currency` | String | Required |
+| `tokens` | Array | Stores auth and refresh token entries |
+| `role` | String | owner, admin, accountant, staff, or viewer |
+| `permissions` | Array | Fine-grained permission strings |
+| `organizationId` | ObjectId | Optional tenant grouping |
+| `lastLogin` | Date | Updated on login |
+| `lastActivityAt` | Date | Updated on authenticated requests |
+| `lastLoginIp` | String | Last seen IP |
+| `lastUserAgent` | String | Last seen user agent |
+| `loginAttempts` | Number | Failed login counter |
+| `lockUntil` | Date | Account lockout timestamp |
 | `createdAt` / `updatedAt` | Date | Mongoose timestamps |
 
 ### Customer
 | Field | Type | Notes |
 |---|---|---|
 | `_id` | ObjectId | Auto |
-| `name` | String | 2–100 chars |
-| `email` | String | |
-| `phone` | String | 8–20 chars |
-| `address` | String | 10–500 chars |
-| `merchant` | ObjectId | Ref → User |
+| `name` | String | Required |
+| `company` | String | Optional |
+| `email` | String | Unique, required |
+| `phone` | String | Required |
+| `mobile` | String | Optional |
+| `addresses` | Array | Address strings |
+| `merchant` | ObjectId | Ref to User |
+| `number_invoices` | Number | Counter used for reporting |
+| `total` | Number | Aggregate total used for reporting |
 
 ### Item
 | Field | Type | Notes |
 |---|---|---|
 | `_id` | ObjectId | Auto |
-| `name` | String | 2–100 chars |
-| `description` | String | optional, max 500 chars |
-| `price` | Number | ≥ 0 |
-| `category` | String | optional, 2–50 chars |
-| `quantity` | Integer | ≥ 0, default 0 |
-| `merchant` | ObjectId | Ref → User |
+| `name` | String | Unique, required |
+| `price` | Number | Required |
+| `description` | String | Optional |
+| `merchant` | ObjectId | Ref to User |
 
 ### Invoice
 | Field | Type | Notes |
 |---|---|---|
 | `_id` | ObjectId | Auto |
-| `number` | String | unique, min 8 chars |
-| `merchant` | ObjectId | Ref → User |
-| `customer` | ObjectId | Ref → Customer |
-| `issued` | Date | Issue date |
-| `due` | Date | Due date |
-| `items` | Array | `{ item: ObjectId, quantity, subtotal }` |
-| `subtotal` | Number | Before discount |
-| `discount` | Number | |
-| `total` | Number | Final amount |
+| `number` | String | Unique, required |
+| `merchant` | ObjectId | Ref to User |
+| `customer` | ObjectId | Ref to Customer |
+| `issued` | Date | Required |
+| `due` | Date | Required |
+| `items` | Array | Invoice line items with item, quantity, subtotal |
+| `subtotal` | Number | Required |
+| `discount` | Number | Required |
+| `total` | Number | Required |
+| `payment` | ObjectId | Optional ref to Payment |
 
 ### Payment
 | Field | Type | Notes |
 |---|---|---|
 | `_id` | ObjectId | Auto |
-| `invoice` | ObjectId | Ref → Invoice (1-to-1) |
-| `amount` | Number | ≥ 0.01 |
-| `currency` | String | 3-char code, default `USD` |
-| `method` | Enum | `card` | `bank_transfer` | `cash` | `check` |
-| `status` | Enum | `pending` | `completed` | `failed` | `cancelled` |
-| `merchant` | ObjectId | Ref → User |
-| `stripePaymentIntentId` | String | Set after Stripe processing |
-| `processedAt` | Date | Set after Stripe processing |
+| `merchant` | ObjectId | Ref to User |
+| `invoice` | ObjectId | Unique ref to Invoice |
+| `status` | String | pending, completed, failed, cancelled, refunded in webhook flow |
+| `amount` | Number | Optional input amount |
+| `currency` | String | Defaults to `usd` |
+| `method` | String | Defaults to `card` |
+| `paid_on` | Date | Payment timestamp |
+| `amount_paid` | Number | Required in the schema |
+| `amount_due` | Number | Required in the schema |
+| `stripePaymentIntentId` | String | Stripe intent reference |
+| `lastWebhookEventId` | String | Last processed Stripe event |
+| `processedAt` | Date | Processing timestamp |
+| `refundedAt` | Date | Refund timestamp |
+
+### RefreshToken
+| Field | Type | Notes |
+|---|---|---|
+| `userId` | ObjectId | Ref to User |
+| `token` | String | Unique refresh token |
+| `expiresAt` | Date | TTL expiration |
+| `revoked` | Boolean | Revocation flag |
+| `deviceInfo` | String | Optional session metadata |
+| `ipAddress` | String | Optional session metadata |
+| `fingerprint` | String | Optional session metadata |
+| `lastUsedAt` | Date | Updated on refresh |
+
+### ProcessedWebhookEvent
+| Field | Type | Notes |
+|---|---|---|
+| `eventId` | String | Unique Stripe event ID |
+| `type` | String | Stripe event type |
+| `processedAt` | Date | TTL-managed cleanup timestamp |
+| `payload` | Mixed | Minimal stored payload |
 
 ---
 
-## 8. Email & PDF Generation
+## 8. Email and PDF Generation
 
 When a merchant calls `POST /api/invoice/send`:
 
-1. **PDF generation** – `pdf-invoice` library builds an invoice PDF from invoice + merchant + customer data and writes it to `attachments/invoice.pdf`.
-2. **Email dispatch** – `nodemailer` sends the PDF as an attachment to the customer's email address. The email body contains a payment link: `<baseUrl>/payment/id/<paymentId>`.
-3. The payment portal is served as an EJS-rendered HTML page from the `views/` directory.
+1. `pdf-invoice` renders the invoice into a PDF and writes it to a unique file under `attachments/`.
+2. `nodemailer` sends that PDF to the customer's email address.
+3. The email body includes a payment link in the legacy portal format: `<baseUrl>/payment/id/<paymentId>`.
+4. The temporary PDF is deleted after the email is sent, and stale PDFs are also cleaned up by a scheduled job.
 
-**Required env vars:** `EMAIL_USER`, `EMAIL_PASS`, `EMAIL_SERVICE` (default: `gmail`), `EMAIL_FROM`.
+Required environment variables: `EMAIL_USER`, `EMAIL_PASS`, `EMAIL_SERVICE`, and `EMAIL_FROM`.
 
 ---
 
@@ -350,13 +413,13 @@ When a merchant calls `POST /api/invoice/send`:
 
 When `POST /api/payment/:id/process` is called:
 
-1. Validates the payment record exists and is not already `completed`.
-2. Creates a `stripe.paymentIntents.create` with the amount (converted to cents), currency, and provided `paymentMethodId`.
-3. Confirms the intent immediately (`confirm: true`).
-4. Stores `stripePaymentIntentId` and `processedAt` on the payment record.
-5. Sets status to `completed` or `failed` based on Stripe's response.
+1. The payment is validated and loaded for the authenticated merchant.
+2. A Stripe PaymentIntent is created and confirmed.
+3. The payment record is updated with Stripe identifiers and processing timestamps.
+4. The payment status is set based on the Stripe result.
+5. Stripe webhooks can later reconcile succeeded, failed, or refunded events.
 
-**Required env var:** `STRIPE_SECRET_KEY`.
+Required environment variables: `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` for webhook verification.
 
 ---
 
@@ -364,14 +427,13 @@ When `POST /api/payment/:id/process` is called:
 
 | Level | Used for |
 |---|---|
-| `error` | Exceptions, failed operations |
-| `warn` | 404s, non-critical issues |
-| `info` | Service-level operations (register, login, CRUD) |
-| `http` | Every HTTP request/response (via Morgan + custom response-time middleware) |
-| `debug` | Token verification, diagnostic details |
+| `error` | Exceptions and failed operations |
+| `warn` | 404s and suspicious or non-critical issues |
+| `info` | Service-level operations and startup events |
+| `http` | HTTP request logging through Morgan |
+| `debug` | Diagnostic details |
 
-- **Development** – coloured console output via Winston + Morgan `dev` format.
-- **Production** – Morgan `combined` format; Winston also writes to `logs/error.log` and `logs/combined.log` (file transport enabled when `NODE_ENV=production`).
+The app uses Morgan for request logs and Winston for application logging. Request context also carries correlation IDs into the response envelope.
 
 ---
 
@@ -382,25 +444,32 @@ When `POST /api/payment/:id/process` is called:
 | `PORT` | No | `3333` | HTTP server port |
 | `HOST` | No | `localhost` | Bind address |
 | `NODE_ENV` | No | `development` | Environment mode |
-| `MONGODB_URL` | **Yes** | – | MongoDB connection string |
-| `JWT_SECRET` | **Yes** | – | HMAC secret for access tokens |
-| `JWT_REFRESH_SECRET` | **Yes** | – | HMAC secret for refresh tokens |
+| `MONGODB_URL` | Yes | - | MongoDB connection string |
+| `JWT_SECRET` | Yes | - | Access token secret |
+| `JWT_REFRESH_SECRET` | Yes | - | Refresh token secret |
 | `JWT_ACCESS_EXPIRATION` | No | `15m` | Access token TTL |
 | `JWT_REFRESH_EXPIRATION` | No | `7d` | Refresh token TTL |
 | `BCRYPT_SALT_ROUNDS` | No | `12` | bcrypt work factor |
-| `EMAIL_USER` | **Yes** | – | SMTP username |
-| `EMAIL_PASS` | **Yes** | – | SMTP password / app password |
+| `EMAIL_USER` | Yes | - | SMTP username |
+| `EMAIL_PASS` | Yes | - | SMTP password or app password |
 | `EMAIL_SERVICE` | No | `gmail` | Nodemailer service |
 | `EMAIL_FROM` | No | `invoiceappserver@gmail.com` | Sender address |
-| `STRIPE_SECRET_KEY` | No* | – | Stripe secret key (*required for payment processing) |
-| `FRONTEND_URL` | No | `http://localhost:3000` | Primary CORS allowed origin |
-| `CORS_ORIGINS` | No | – | Comma-separated extra CORS origins |
-| `TRUST_PROXY` | No | auto in prod | Set `true` when behind reverse proxy |
+| `STRIPE_SECRET_KEY` | Yes for payments | - | Stripe secret key |
+| `STRIPE_WEBHOOK_SECRET` | Yes for webhooks | - | Stripe webhook signature secret |
+| `FRONTEND_URL` | No | `http://localhost:3000` | Primary CORS origin |
+| `CORS_ORIGINS` | No | - | Comma-separated extra CORS origins |
+| `TRUST_PROXY` | No | `false` | Reverse proxy trust flag |
+| `AUTH_STRATEGY` | No | `hybrid` | `header`, `cookie`, or `hybrid` |
+| `AUTH_INACTIVITY_TIMEOUT_MS` | No | `1800000` | Session inactivity timeout |
+| `COOKIE_SECURE` | No | `false` | Secure cookie flag |
+| `COOKIE_SAME_SITE` | No | `lax` | Cookie same-site policy |
+| `COOKIE_DOMAIN` | No | - | Cookie domain |
 | `LOG_LEVEL` | No | `info` | Winston log level |
-| `API_RATE_LIMIT_WINDOW_MS` | No | `900000` | API rate-limit window (ms) |
-| `API_RATE_LIMIT_MAX_REQUESTS` | No | `100` | Max requests per window |
-| `LOGIN_RATE_LIMIT_WINDOW_MS` | No | `900000` | Login rate-limit window (ms) |
-| `LOGIN_RATE_LIMIT_MAX_REQUESTS` | No | `5` | Max login attempts per window |
+| `API_RATE_LIMIT_WINDOW_MS` | No | `900000` | General API rate window |
+| `API_RATE_LIMIT_MAX_REQUESTS` | No | `100` | General API max requests |
+| `LOGIN_RATE_LIMIT_WINDOW_MS` | No | `900000` | Login rate window |
+| `LOGIN_RATE_LIMIT_MAX_REQUESTS` | No | `5` | Login max requests |
+| `USER_RATE_LIMIT_MAX_REQUESTS` | No | `60` | Per-user limiter max requests |
 
 ---
 
@@ -409,30 +478,35 @@ When `POST /api/payment/:id/process` is called:
 ### Production Dependencies
 | Package | Version | Purpose |
 |---|---|---|
-| `express` | ^4.21.2 | HTTP server & routing framework |
-| `mongoose` | ^8.15.1 | MongoDB ODM |
-| `dotenv` | ^17.4.2 | `.env` file loader |
-| `bcrypt` | ^5.1.1 | Password hashing |
-| `jsonwebtoken` | ^9.0.2 | JWT sign & verify |
-| `joi` | ^18.2.1 | Request body validation |
-| `helmet` | ^8.1.0 | HTTP security headers |
-| `cors` | ^2.8.6 | CORS middleware |
-| `express-rate-limit` | ^8.5.1 | Rate limiting |
-| `compression` | ^1.8.1 | gzip/deflate response compression |
-| `morgan` | ^1.10.1 | HTTP request logging |
-| `winston` | ^3.19.0 | Structured application logging |
-| `swagger-jsdoc` | ^6.2.8 | OpenAPI spec from JSDoc annotations |
-| `swagger-ui-express` | ^5.0.1 | Serves Swagger UI at `/api-docs` |
-| `stripe` | ^18.1.1 | Stripe payment processing SDK |
-| `pdf-invoice` | ^1.0.2 | PDF invoice generation |
-| `lodash` | ^4.17.21 | Utility functions |
+| `express` | `^4.21.2` | HTTP server and routing |
+| `mongoose` | `^8.15.1` | MongoDB ODM |
+| `dotenv` | `^17.4.2` | Environment variable loading |
+| `bcrypt` | `^5.1.1` | Password hashing |
+| `jsonwebtoken` | `^9.0.2` | JWT sign and verify |
+| `joi` | `^18.2.1` | Request validation |
+| `helmet` | `^8.1.0` | HTTP security headers |
+| `cors` | `^2.8.6` | CORS middleware |
+| `express-rate-limit` | `^8.5.1` | Rate limiting |
+| `compression` | `^1.8.1` | Response compression |
+| `morgan` | `^1.10.1` | HTTP request logging |
+| `winston` | `^3.19.0` | Application logging |
+| `swagger-jsdoc` | `^6.2.8` | OpenAPI generation from JSDoc |
+| `swagger-ui-express` | `^5.0.1` | Swagger UI |
+| `stripe` | `^18.1.1` | Stripe SDK |
+| `pdf-invoice` | `^1.0.2` | PDF invoice generation |
+| `lodash` | `^4.17.21` | Utility helpers |
+| `cookie-parser` | `^1.4.7` | Cookie parsing for browser auth |
+| `node-cron` | `^3.0.3` | Scheduled cleanup jobs |
+| `nodemailer` | `^6.10.1` | SMTP email delivery |
 
 ### Dev Dependencies
 | Package | Version | Purpose |
 |---|---|---|
-| `nodemon` | ^3.1.10 | Auto-restart on file change |
-| `ejs` | ^3.1.10 | HTML template engine (payment portal views) |
-| `nodemailer` | ^6.10.1 | SMTP email sending |
+| `ejs` | `^3.1.10` | Payment portal templates |
+| `jest` | `^29.7.0` | Test runner |
+| `mongodb-memory-server` | `^10.4.3` | In-memory MongoDB for tests |
+| `nodemon` | `^3.1.10` | Development auto-reload |
+| `supertest` | `^7.2.2` | HTTP endpoint testing |
 
 ---
 
@@ -440,41 +514,39 @@ When `POST /api/payment/:id/process` is called:
 
 | Command | Description |
 |---|---|
-| `npm start` | Start production server (`node server.js`) |
-| `npm run dev` | Start development server with auto-reload (`nodemon server.js`) |
+| `npm start` | Start the server with `node server.js` |
+| `npm run dev` | Start the server with `nodemon server.js` |
+| `npm run seed:dummy` | Seed dummy data via `scripts/seedDummyData.js 30` |
+| `npm test` | Run Jest in-band |
+| `npm run test:watch` | Run Jest in watch mode |
 
 ---
 
 ## 14. API Documentation (Swagger)
 
-- Available at: `GET /api-docs`
-- Spec: OpenAPI 3.0.3, built at startup from JSDoc `@swagger` blocks in `src/controllers/*.js` and `src/routes/index.js`
-- Auth: Click **Authorize 🔓**, enter the `accessToken` from login (Swagger prepends `Bearer` automatically)
-- Features: persistent auth, request duration display, filtering, try-it-out enabled
+- Available at `GET /api-docs`
+- Generated from JSDoc annotations in `src/controllers/*.js`, `src/routes/*.js`, and related route modules
+- Uses OpenAPI 3.0.3 through `swagger-jsdoc` and `swagger-ui-express`
+- Accepts the JWT access token via the Swagger Authorize button
 
 ---
 
-## 15. Accessibility & Frontend Notes
+## 15. Accessibility and Frontend Notes
 
-This is a **pure REST API** – it has no frontend of its own. The companion frontend is [invoice-app-client](https://github.com/jKh98/invoice-app-client).
+This is a JSON-first REST API. It does not ship a full frontend application of its own, but it does serve EJS-based payment portal pages from `views/`.
 
-- All responses are JSON (except the EJS-rendered payment portal pages).
-- Tokens are exposed in both response body and response headers (`x-auth`, `x-refresh-token`) for flexible client integration.
-- CORS is configurable to support any frontend origin via `FRONTEND_URL` / `CORS_ORIGINS`.
-- CORS allows auth-related custom headers (`x-auth`, `x-refresh-token`) in preflight for browser clients.
-- `credentials: true` is set in CORS options, so cookie-based auth from a browser is supported.
-- Pagination on all list endpoints (limit/skip/sort) keeps payloads small for mobile clients.
-- The Swagger UI (`/api-docs`) can be used directly by frontend developers to explore and test endpoints without a separate tool.
+- All core API responses are JSON.
+- Token transport supports headers and browser cookies.
+- CORS is configurable through environment variables.
+- Auth-related custom headers are explicitly allowed in CORS preflight.
+- The Swagger UI can be used directly for manual testing and integration checks.
 
 ---
 
-## 16. Known Limitations / Areas for Future Development
+## 16. Known Limitations and Future Work
 
-- No role-based access control (RBAC) – `authenticateAdmin` is currently identical to `authenticate` (placeholder for future admin roles).
-- No unit or integration test suite is wired up (`npm test` exits with an error).
-- Invoice `send` endpoint generates a PDF to a single shared path (`attachments/invoice.pdf`), which creates a race condition under concurrent requests.
-- Payment portal pages (`views/`) are served as static EJS templates but there is no dedicated route file documenting their URL structure in Swagger.
-- No file-upload endpoint despite `upload` config (max 5 MB, allowed types: JPEG, PNG, GIF, PDF) defined in `config.js`.
-- Stripe webhook handling is not implemented; payment status updates must be triggered manually.
-- User schema defines email indexing twice (`unique: true` and explicit `schema.index({ email: 1 })`), causing a duplicate-index warning at runtime.
-- Refresh-token TTL is implemented with a document-level MongoDB TTL index on `tokens.expiresAt`, which can delete whole user documents when a token expires and should be redesigned.
+- The upload configuration exists, but there is no active upload route yet.
+- Some legacy root controllers and models remain in the repository for compatibility and historical reference.
+- The API docs and runtime route surface should continue to be kept in sync as the codebase evolves.
+- Stripe webhook processing exists, but any new event types still need explicit handler logic before they affect business state.
+

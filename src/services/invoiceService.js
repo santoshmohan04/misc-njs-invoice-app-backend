@@ -23,7 +23,7 @@ class InvoiceService {
 
       // Validate customer exists and belongs to merchant
       const customer = await customerRepository.findById(invoiceData.customer);
-      if (!customer || customer.merchant.toString() !== merchantId) {
+      if (!customer || customer.merchant.toString() !== String(merchantId)) {
         return createErrorResponse('Customer not found', 404);
       }
 

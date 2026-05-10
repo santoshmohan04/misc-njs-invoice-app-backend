@@ -91,7 +91,7 @@ class CustomerService {
 
       const customer = await customerRepository.findById(customerId);
 
-      if (!customer || customer.merchant.toString() !== merchantId) {
+      if (!customer || customer.merchant.toString() !== String(merchantId)) {
         return createErrorResponse('Customer not found', 404);
       }
 
@@ -118,7 +118,7 @@ class CustomerService {
 
       // Check if customer exists and belongs to merchant
       const existingCustomer = await customerRepository.findById(customerId);
-      if (!existingCustomer || existingCustomer.merchant.toString() !== merchantId) {
+      if (!existingCustomer || existingCustomer.merchant.toString() !== String(merchantId)) {
         return createErrorResponse('Customer not found', 404);
       }
 
@@ -170,7 +170,7 @@ class CustomerService {
 
       // Check if customer exists and belongs to merchant
       const customer = await customerRepository.findById(customerId);
-      if (!customer || customer.merchant.toString() !== merchantId) {
+      if (!customer || customer.merchant.toString() !== String(merchantId)) {
         return createErrorResponse('Customer not found', 404);
       }
 
