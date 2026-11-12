@@ -30,17 +30,18 @@ src/
     swagger.js          OpenAPI 3.0 spec built from JSDoc + swagger-ui-express
     storage.js          Attachment file helpers and temporary PDF cleanup helpers
   routes/
-    index.js            Route registration for /health, /api/*, and legacy routes
-    reporting.routes.js  Reporting route mount
-    stripeWebhook.routes.js  Stripe webhook route mount
-  controllers/          Thin Express routers that delegate to services
-  services/             Business logic for auth, customers, items, invoices, payments, reporting, webhooks
+    index.js            Route registration – /health, /api/*, legacy routes (no /api prefix)
+    stripeWebhook.routes.js  Stripe webhook handling endpoints
+    reporting.routes.js Reporting dashboard routes
+  controllers/          Express routers that delegate to services
+  services/             Business logic for auth, customers, items, invoices, payments,
+                        reporting, and webhooks
   repositories/         Mongoose query layer plus base repository helpers
   middlewares/
     authenticate.js     Access-token auth, optional auth, and admin alias
     authorization.js    Role and permission guards
-    validate.js         Joi validation middleware
-    rateLimiter.js      Re-exports configured rate limiters
+    validate.js         Joi schema validation middleware
+    rateLimiter.js      Configured express-rate-limit middleware
     errorHandler.js     Centralised 404 and error handling
     requestContext.js   Correlation ID and request timing context
   helpers/
@@ -49,9 +50,11 @@ src/
   utils/
     authUtils.js        JWT helpers, bcrypt helpers, token extraction
     logger.js           Winston logging
-  validations/          Joi schemas by resource
   auth/
     rbac.js             Role and permission checks
+  jobs/
+    cleanupJobs.js      Scheduled refresh-token and temporary-PDF cleanup
+  validations/          Per-resource Joi schemas
   docs/
     API.md              Human-readable API reference
 views/                  EJS payment portal pages
@@ -119,9 +122,9 @@ HTTP request
 | Feature | Detail |
 |---|---|
 | Create or update invoice | Upsert by invoice number and validate customer ownership |
-| List all invoices | Returns all invoices for the merchant |
+| List all invoices | Returns all invoices for the merchant, with the associated payment populated when one exists |
 | Invoice statistics | Totals and outstanding amounts |
-| Send invoice by email | Generates a PDF, sends email, and includes a payment link |
+| Send invoice by email | Generates a PDF, emails it to the customer, and includes a payment link |
 
 ### 3.5 Payment Processing
 | Feature | Detail |
@@ -147,6 +150,14 @@ HTTP request
 
 ### 3.7 Health Check
 - `GET /health` returns server status, environment, version, and timestamp without authentication.
+
+### 3.8 Scheduled Cleanup Jobs
+| Feature | Detail |
+|---|---|
+| Refresh-token cleanup | Removes expired or revoked refresh tokens; the collection also has a MongoDB TTL index |
+| Temporary PDF cleanup | Removes generated invoice PDFs older than one hour |
+
+**Technology:** `node-cron` schedules these jobs when the application starts; jobs are disabled in test mode.
 
 ---
 
@@ -219,10 +230,11 @@ Protected endpoints accept the access token through `x-auth`, `Authorization: Be
 | GET | `/api/reports/monthly-trends` | Required | Monthly trends |
 | GET | `/api/reports/outstanding-balances` | Required | Outstanding balances |
 
-### Webhooks - `/api/webhooks`
+### Webhooks – `/api/webhooks`
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/api/webhooks/stripe` | Stripe signature required | Process Stripe webhook events |
+| POST | `/api/webhooks/stripe` | Stripe signature | Receive Stripe events (payment status updates) |
+
 
 > Legacy routes without `/api` are also registered for backward compatibility, including `/user/*`, `/customer/*`, `/item/*`, `/invoice/*`, `/payment/*`, `/reports/*`, and `/webhooks/stripe`.
 
@@ -280,6 +292,7 @@ Login lockout is enforced after 5 failed attempts and lasts 2 hours. Successful 
 | JWT access tokens | HS256 signed with `JWT_SECRET` |
 | JWT refresh tokens | HS256 signed with `JWT_REFRESH_SECRET` |
 | Auth strategy | `header`, `cookie`, or `hybrid` via `AUTH_STRATEGY` |
+| Auth headers and cookies | Supports `x-auth`, `Authorization: Bearer`, and configured httpOnly cookies |
 | Session timeout | Controlled by `AUTH_INACTIVITY_TIMEOUT_MS` |
 | Input validation | Joi schemas on mutating endpoints |
 | Error handling | Centralised error handler with generic production fallback |
@@ -287,7 +300,8 @@ Login lockout is enforced after 5 failed attempts and lasts 2 hours. Successful 
 | X-Powered-By | Disabled in Express and Helmet |
 | Swagger CSP | Relaxed only for `/api-docs` |
 | Webhook verification | Stripe webhook signatures are required on `/api/webhooks/stripe` |
-| Refresh token cleanup | Separate TTL-backed `refresh_tokens` collection plus scheduled cleanup jobs |
+| Refresh-token cleanup | Dedicated `refresh_tokens` collection with a TTL index and scheduled cleanup |
+| Raw webhook body | Stripe webhook routes receive the raw request body for signature verification |
 
 The config file also defines upload limits, but no active upload route exists yet.
 
@@ -354,7 +368,7 @@ The config file also defines upload limits, but no active upload route exists ye
 | `subtotal` | Number | Required |
 | `discount` | Number | Required |
 | `total` | Number | Required |
-| `payment` | ObjectId | Optional ref to Payment |
+| `payment` | Payment object | Optional one-to-one virtual relationship; populated in invoice lists when a payment exists |
 
 ### Payment
 | Field | Type | Notes |
@@ -409,6 +423,27 @@ Required environment variables: `EMAIL_USER`, `EMAIL_PASS`, `EMAIL_SERVICE`, and
 
 ---
 
+## 8.1 Stripe Webhook Processing
+
+The application implements full Stripe webhook handling at `POST /api/webhooks/stripe`:
+
+1. **Webhook receipt** – Listens for Stripe events (e.g., `charge.succeeded`, `charge.failed`) via the `/api/webhooks/stripe` endpoint.
+2. **Signature verification** – Validates the `stripe-signature` header using `STRIPE_WEBHOOK_SECRET` to ensure authenticity.
+3. **Duplicate detection** – Uses `ProcessedWebhookEvent` model to prevent re-processing of duplicate events.
+4. **Event processing** – Routes events to `StripeWebhookService` for business logic (e.g., updating payment status).
+5. **Response** – Returns `200 OK` on success; `400` on validation failure.
+
+**Required env var:** `STRIPE_WEBHOOK_SECRET` (available in Stripe Dashboard).
+
+**Supported events:**
+- `payment_intent.succeeded` – Updates payment status to `completed`
+- `payment_intent.payment_failed` – Updates payment status to `failed`
+- `charge.succeeded` – Confirms successful charge
+
+**Legacy route:** `POST /webhooks/stripe` (backward compatibility)
+
+---
+
 ## 9. Payment Processing (Stripe)
 
 When `POST /api/payment/:id/process` is called:
@@ -420,6 +455,8 @@ When `POST /api/payment/:id/process` is called:
 5. Stripe webhooks can later reconcile succeeded, failed, or refunded events.
 
 Required environment variables: `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` for webhook verification.
+
+**Webhook-based updates:** Payment status can also be updated automatically via the Stripe webhook endpoint (see **Section 8.1**) when Stripe events are received.
 
 ---
 
@@ -454,8 +491,8 @@ The app uses Morgan for request logs and Winston for application logging. Reques
 | `EMAIL_PASS` | Yes | - | SMTP password or app password |
 | `EMAIL_SERVICE` | No | `gmail` | Nodemailer service |
 | `EMAIL_FROM` | No | `invoiceappserver@gmail.com` | Sender address |
-| `STRIPE_SECRET_KEY` | Yes for payments | - | Stripe secret key |
-| `STRIPE_WEBHOOK_SECRET` | Yes for webhooks | - | Stripe webhook signature secret |
+| `STRIPE_SECRET_KEY` | No | - | Stripe secret key (required for payment processing) |
+| `STRIPE_WEBHOOK_SECRET` | No | - | Stripe webhook signing secret (required to verify webhook requests) |
 | `FRONTEND_URL` | No | `http://localhost:3000` | Primary CORS origin |
 | `CORS_ORIGINS` | No | - | Comma-separated extra CORS origins |
 | `TRUST_PROXY` | No | `false` | Reverse proxy trust flag |
