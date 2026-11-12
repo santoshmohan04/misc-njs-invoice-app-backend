@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const Schema = mongoose.Schema
 const _ = require("lodash")
+const { Payment } = require("./payment");
 
 const InvoiceSchema = new Schema({
     number: {
@@ -75,9 +76,16 @@ const InvoiceSchema = new Schema({
 
 InvoiceSchema.index({number: 1, customer: 1}, {unique: true});
 
+InvoiceSchema.virtual('payment', {
+    ref: Payment,
+    localField: '_id',
+    foreignField: 'invoice',
+    justOne: true,
+});
+
 InvoiceSchema.methods.toJSON = function () {
     const item = this;
-    const itemObject = item.toObject();
+    const itemObject = item.toObject({ virtuals: true });
     return _.pick(itemObject, ["_id", "number", "customer", "issued", "due", "items", "subtotal", "discount", "total", "payment"]);
 }
 

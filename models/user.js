@@ -3,6 +3,7 @@ const Schema = mongoose.Schema;
 const jwt = require("jsonwebtoken");
 const _ = require("lodash");
 const { hashPassword, comparePassword, generateAccessToken, generateRefreshToken } = require("../src/utils/authUtils");
+const Logger = require('../src/utils/logger');
 const { AUTH_CONSTANTS } = require('../src/constants/api.constants');
 
 // JWT Configuration from environment
@@ -235,22 +236,27 @@ UserSchema.statics.findUserByCredentials = async function (email, password) {
 
     const user = await User.findOne({ email });
     if (!user) {
+        Logger.warn('Login failed - user not found', { email });
         throw new Error('Invalid email or password');
     }
 
     // Check if account is locked
     if (user.isLocked) {
+        Logger.warn('Login failed - account locked', { email, userId: user._id });
         throw new Error('Account is temporarily locked due to too many failed login attempts');
     }
 
     const isPasswordValid = await comparePassword(password, user.password);
     if (!isPasswordValid) {
+        // Log a concise warning (never log plaintext passwords). Include hash prefix to help debug hashing issues.
+        Logger.warn('Login failed - password mismatch', { email, userId: user._id, hashPrefix: user.password ? user.password.slice(0, 8) : null });
         await user.incLoginAttempts();
         throw new Error('Invalid email or password');
     }
 
     // Update last login on successful authentication
     await user.updateLastLogin();
+    Logger.info('User authenticated successfully', { email, userId: user._id });
 
     return user;
 };
